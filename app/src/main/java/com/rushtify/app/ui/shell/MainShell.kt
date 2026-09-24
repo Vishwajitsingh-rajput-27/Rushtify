@@ -84,9 +84,12 @@ import com.rushtify.app.ui.common.ExpressiveMotion
 import com.rushtify.app.ui.common.PredictiveBackScreen
 import com.rushtify.app.ui.common.adaptiveContentWidth
 import com.rushtify.app.ui.feed.FeedScreen
+import com.rushtify.app.ui.feed.FeedViewModel
 import com.rushtify.app.ui.home.HomeScreen
+import com.rushtify.app.ui.home.HomeViewModel
 import com.rushtify.app.ui.player.LocalMiniPlayerScrollClearance
 import com.rushtify.app.ui.playlist.PlaylistScreen
+import com.rushtify.app.ui.playlist.PlaylistViewModel
 import androidx.compose.foundation.shape.CornerBasedShape
 import com.rushtify.app.ui.theme.LiquidGlassPreset
 import com.rushtify.app.ui.theme.LocalIsDarkTheme
@@ -174,6 +177,12 @@ fun MainShell(
     val pagerState = rememberPagerState(pageCount = { tabs.size })
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    // Start all primary tab loads as soon as the shell exists. FeedScreen is
+    // the first visible Home tab, while the local Home stats and playlists
+    // are warmed in parallel so switching tabs does not show a fresh loader.
+    hiltViewModel<FeedViewModel>()
+    hiltViewModel<HomeViewModel>()
+    hiltViewModel<PlaylistViewModel>()
     val updateInfo by mainShellViewModel.updateInfo.collectAsStateWithLifecycle()
     val showUpdateBanner = updateInfo.isUpdateAvailable && !updateInfo.isDismissed
     val backgroundColor = MaterialTheme.colorScheme.background
