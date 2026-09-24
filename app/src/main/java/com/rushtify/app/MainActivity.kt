@@ -10,7 +10,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -58,10 +57,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Must be called before super.onCreate() and before setContent().
-        val splashScreen = runCatching { installSplashScreen() }
-            .onFailure { android.util.Log.e(STARTUP_TAG, "Splash compatibility layer unavailable", it) }
-            .getOrNull()
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             // Adopt choices made via system Settings -> App languages so the
@@ -87,23 +82,6 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
             .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
         handlePlaybackIntent(intent)
         handleNavigationIntent(intent)
-        runCatching {
-            splashScreen?.setOnExitAnimationListener { provider ->
-                runCatching {
-                    provider.view.animate()
-                        .alpha(0f)
-                        .scaleX(1.025f)
-                        .scaleY(1.025f)
-                        .setDuration(260L)
-                        .setInterpolator(android.view.animation.PathInterpolator(0.2f, 0f, 0f, 1f))
-                        .withEndAction { runCatching { provider.remove() } }
-                        .start()
-                }.onFailure {
-                    android.util.Log.w(STARTUP_TAG, "Splash exit animation skipped", it)
-                    runCatching { provider.remove() }
-                }
-            }
-        }.onFailure { android.util.Log.w(STARTUP_TAG, "Splash exit listener unavailable", it) }
         runCatching {
             enableEdgeToEdge(
                 statusBarStyle = androidx.activity.SystemBarStyle.auto(
