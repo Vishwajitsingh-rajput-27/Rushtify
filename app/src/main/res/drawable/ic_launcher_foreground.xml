@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Rushtify launcher mark: R (stem+bowl) whose leg is a rising
+     cyan-to-magenta arrow over sound-waves (navy comes from the
+     adaptive background layer). Auto-centered; inside the adaptive
+     icon safe zone (r=33 of 108). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="1.000" android:scaleY="1.000" android:pivotX="54" android:pivotY="54">
+        <path
+            android:pathData="M37.04,70.75 L37.04,42.75 L50.04,42.75 C61.04,42.75 62.04,59.25 47.04,59.75"
+            android:strokeWidth="8.00" android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="37.04" android:startY="42.75" android:endX="47.04" android:endY="59.75"><item android:offset="0.00" android:color="#FFCF2B8A"/><item android:offset="0.45" android:color="#FF6C4A9E"/><item android:offset="1.00" android:color="#FF2DACCC"/></gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M31.04,68.75 C36.04,60.75 42.04,60.75 47.04,65.75 C51.04,70.75 57.04,69.75 62.04,61.75"
+            android:strokeWidth="6.50" android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="31.04" android:startY="68.75" android:endX="62.04" android:endY="61.75"><item android:offset="0.00" android:color="#FF1E5FAE"/><item android:offset="1.00" android:color="#FF2DACCC"/></gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M37.04,76.75 C41.04,72.25 47.04,72.25 51.04,75.75 C53.04,77.25 56.04,76.75 58.04,72.75"
+            android:strokeWidth="5.50" android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="37.04" android:startY="76.75" android:endX="58.04" android:endY="72.75"><item android:offset="0.00" android:color="#FF13458A"/><item android:offset="1.00" android:color="#FF1E7FA8"/></gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M47.04,59.75 L70.54,38.25"
+            android:strokeWidth="8.00" android:strokeLineCap="round" android:strokeLineJoin="round">
+            <aapt:attr name="android:strokeColor">
+                <gradient android:type="linear" android:startX="47.04" android:startY="59.75" android:endX="70.54" android:endY="38.25"><item android:offset="0.00" android:color="#FF2DACCC"/><item android:offset="0.50" android:color="#FF7E3C93"/><item android:offset="1.00" android:color="#FFE0409A"/></gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M76.45,32.85 L76.96,45.26 L64.13,31.25 Z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="47.04" android:startY="59.75" android:endX="70.54" android:endY="38.25"><item android:offset="0.00" android:color="#FFCF2B8A"/><item android:offset="1.00" android:color="#FFFF62B0"/></gradient>
+            </aapt:attr>
+        </path>
+    </group>
+</vector>

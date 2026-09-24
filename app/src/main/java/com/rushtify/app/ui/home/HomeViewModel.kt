@@ -1,0 +1,927 @@
+package com.rushtify.app.ui.home
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rushtify.app.data.local.SessionPreferences
+import com.rushtify.app.data.model.FriendEntry
+import com.rushtify.app.data.repository.HomeRepository
+import com.rushtify.app.data.repository.HomeSortMode
+import com.rushtify.app.data.repository.HomeStats
+import com.rushtify.app.data.model.RecentTrack
+import com.rushtify.app.data.repository.HomeTrack
+import com.rushtify.app.data.repository.HomeAlbum
+import com.rushtify.app.data.repository.HomeArtistItem
+import com.rushtify.app.data.repository.ThemeRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Calendar
+import javax.inject.Inject
+
+import androidx.compose.runtime.Immutable
+import kotlinx.coroutines.Dispatchers
+
+@Immutable
+data class HomeUiState(
+    val isLoading: Boolean = true,
+    val isRefreshing: Boolean = false,
+    val username: String = "",
+    /** The account whose data is currently loaded — equal to [username]
+     *  (the signed-in user) unless viewing a friend's profile via the
+     *  friend-switcher (tap the username pill), in which case this is the
+     *  friend's Last.fm username instead. Every list/stat on screen
+     *  reflects THIS account, not necessarily the signed-in one. */
+    val viewingUsername: String = "",
+    val stats: HomeStats? = null,
+    val nowPlaying: HomeTrack? = null,
+    val sortMode: HomeSortMode = HomeSortMode.RECENT,
+    val allTracks: List<HomeTrack> = emptyList(),
+    val topTracksOverall: List<HomeTrack> = emptyList(),
+    val topTracks7Days: List<HomeTrack> = emptyList(),
+    val topTracks30Days: List<HomeTrack> = emptyList(),
+    /** Top artists / albums podium + genre chips. Last.fm origin when
+     *  connected, Room + taste-profile origin in local mode. Empty = hide. */
+    val topArtists: List<com.rushtify.app.data.repository.HomeArtistItem> = emptyList(),
+    val topAlbums: List<com.rushtify.app.data.repository.HomeAlbum> = emptyList(),
+    val topTags: List<String> = emptyList(),
+    val page: Int = 1,
+    val totalPages: Int = 1,
+    val error: String? = null,
+    val friends: List<FriendEntry> = emptyList(),
+    val isLoadingFriends: Boolean = false,
+    val showFriendsSheet: Boolean = false,
+    val pinnedFriends: Set<String> = emptySet(),
+    /**
+     * True when Last.fm is NOT connected and Stats runs in Local Stats Mode
+     * (aggregated from the local Room database). The UI shows a subtle
+     * "Connect Last.fm in Settings to sync global scrobbles" banner.
+     */
+    val isLocalStatsMode: Boolean = false,
+) {
+    val isViewingFriend: Boolean get() = viewingUsername.isNotBlank() && viewingUsername != username
+
+    /** Pinned friends first (stable within each group — user.getfriends'
+     *  own order otherwise), for the friend-switcher sheet. */
+    val sortedFriends: List<FriendEntry> get() = friends.sortedByDescending { it.name in pinnedFriends }
+}
+
+@Immutable
+sealed interface HomeRow {
+    @Immutable
+    data class DateHeader(val label: String) : HomeRow
+    @Immutable
+    data class Track(val track: HomeTrack, val badge: String?) : HomeRow
+    @Immutable
+    data class Album(val album: HomeAlbum, val badge: String?) : HomeRow
+    @Immutable
+    data class Artist(val artist: HomeArtistItem, val badge: String?) : HomeRow
+}
+
+/** Derives the display list for the current tab — instant, smooth, and accurate. */
+fun HomeUiState.visibleRows(): List<HomeRow> {
+    return when (sortMode) {
+        HomeSortMode.RECENT -> {
+            val dated = allTracks.filter { it.timestampMillis != null }.sortedByDescending { it.timestampMillis }
+            val rows = mutableListOf<HomeRow>()
+            nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
+
+            val dayGroups = dated.groupBy { dateKeyOf(it.timestampMillis ?: 0L) }
+            dayGroups.forEach { (_, tracksInDay) ->
+                val firstTrackInDay = tracksInDay.firstOrNull()
+                if (firstTrackInDay != null && firstTrackInDay.timestampMillis != null) {
+                    dateLabelOf(firstTrackInDay.timestampMillis)?.let { rows += HomeRow.DateHeader(it) }
+                }
+                val seenKeysInDay = mutableSetOf<String>()
+                val countMap = tracksInDay.groupingBy { it.key }.eachCount()
+                tracksInDay.forEach { t ->
+                    if (seenKeysInDay.add(t.key)) {
+                        val count = countMap[t.key] ?: 1
+                        rows += HomeRow.Track(t, badge = if (count > 1) "${count}\u00d7" else null)
+                    }
+                }
+            }
+            rows
+        }
+        HomeSortMode.MOST_PLAYED -> {
+            val candidateList = if (topTracksOverall.isNotEmpty()) topTracksOverall else allTracks
+            val rows = mutableListOf<HomeRow>()
+            nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
+            candidateList.filter { !it.isNowPlaying }.sortedByDescending { it.playCount }.forEach { t ->
+                rows += HomeRow.Track(t, badge = playCountBadge(t.playCount))
+            }
+            rows
+        }
+        HomeSortMode.LAST_7_DAYS -> {
+            val candidateList = if (topTracks7Days.isNotEmpty()) topTracks7Days else {
+                val cutoff = System.currentTimeMillis() - 7L * 24 * 60 * 60 * 1000
+                allTracks.filter { it.timestampMillis != null && it.timestampMillis >= cutoff }
+            }
+            val rows = mutableListOf<HomeRow>()
+            nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
+            candidateList.filter { !it.isNowPlaying }.sortedByDescending { it.playCount }.forEach { t ->
+                rows += HomeRow.Track(t, badge = playCountBadge(t.playCount))
+            }
+            rows
+        }
+        HomeSortMode.LAST_30_DAYS -> {
+            val candidateList = if (topTracks30Days.isNotEmpty()) topTracks30Days else {
+                val cutoff = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000
+                allTracks.filter { it.timestampMillis != null && it.timestampMillis >= cutoff }
+            }
+            val rows = mutableListOf<HomeRow>()
+            nowPlaying?.let { rows += HomeRow.Track(it, badge = null) }
+            candidateList.filter { !it.isNowPlaying }.sortedByDescending { it.playCount }.forEach { t ->
+                rows += HomeRow.Track(t, badge = playCountBadge(t.playCount))
+            }
+            rows
+        }
+        HomeSortMode.TOP_ALBUMS -> {
+            val rows = mutableListOf<HomeRow>()
+            topAlbums.forEach { a ->
+                rows += HomeRow.Album(a, badge = null)
+            }
+            rows
+        }
+        HomeSortMode.TOP_ARTISTS -> {
+            val rows = mutableListOf<HomeRow>()
+            topArtists.forEach { a ->
+                rows += HomeRow.Artist(a, badge = null)
+            }
+            rows
+        }
+    }
+}
+
+private fun playCountBadge(count: Int): String? {
+    if (count <= 0) return null
+    return if (count >= 1000) "%.1fk".format(count / 1000.0) else count.toString()
+}
+
+private fun dateKeyOf(millis: Long): String {
+    val cal = Calendar.getInstance().apply { timeInMillis = millis }
+    return "${cal.get(Calendar.YEAR)}-${cal.get(Calendar.DAY_OF_YEAR)}"
+}
+
+private fun dateLabelOf(millis: Long): String? {
+    val target = Calendar.getInstance().apply { timeInMillis = millis }
+    val today = Calendar.getInstance()
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    return when {
+        isSameDay(target, today) -> null
+        isSameDay(target, yesterday) -> "Yesterday"
+        else -> {
+            val months = arrayOf("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+            "${target.get(Calendar.DAY_OF_MONTH)} ${months[target.get(Calendar.MONTH)]} ${target.get(Calendar.YEAR)}"
+        }
+    }
+}
+
+private fun isSameDay(a: Calendar, b: Calendar): Boolean =
+    a.get(Calendar.YEAR) == b.get(Calendar.YEAR) && a.get(Calendar.DAY_OF_YEAR) == b.get(Calendar.DAY_OF_YEAR)
+
+private const val NOW_PLAYING_POLL_MS = 12_000L
+private const val RECENT_TRACKS_POLL_MS = 30_000L
+private const val LISTEN_TICK_MS = 1_000L
+
+/** Caps how many scrobbles the "Recent" tab keeps merging in across a
+ *  session. Without this, allTracks grew forever the longer Home stayed
+ *  open — every 30s poll prepended newly-scrobbled tracks and kept every
+ *  older one too, so both memory and the cost of re-deriving the visible
+ *  rows (filter/group/sort) crept up the longer you left the app open. */
+private const val HOME_TRACK_HISTORY_CAP = 500
+
+/** Bundles just the fields [HomeUiState.visibleRows] actually reads, so the
+ *  background row-computation below only re-runs when one of them changes —
+ *  not on every unrelated uiState update (e.g. the friends sheet opening). */
+private data class RowsKey(
+    val allTracks: List<HomeTrack>,
+    val sortMode: HomeSortMode,
+    val nowPlaying: HomeTrack?,
+    val topTracksOverall: List<HomeTrack>,
+    val topTracks7Days: List<HomeTrack>,
+    val topTracks30Days: List<HomeTrack>,
+    val topArtists: List<com.rushtify.app.data.repository.HomeArtistItem>,
+    val topAlbums: List<com.rushtify.app.data.repository.HomeAlbum>,
+)
+
+
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val homeRepository: HomeRepository,
+    private val localStatsRepository: com.rushtify.app.data.repository.LocalStatsRepository,
+    private val tasteProfileProvider: com.rushtify.app.data.generate.TasteProfileProvider,
+    private val sessionPreferences: SessionPreferences,
+    private val themeRepository: ThemeRepository,
+    private val viewingProfileState: com.rushtify.app.data.repository.ViewingProfileState,
+    private val settingsPreferences: com.rushtify.app.data.local.SettingsPreferences,
+    private val scrobbleRepository: com.rushtify.app.data.repository.ScrobbleRepository,
+) : ViewModel() {
+
+    companion object {
+        private fun isLastFmUsername(username: String): Boolean =
+            username.isNotBlank() && !username.equals("Guest User", ignoreCase = true)
+    }
+
+    private val _uiState = MutableStateFlow(HomeUiState())
+    val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
+    private val _listenElapsedSeconds = MutableStateFlow(0)
+    val listenElapsedSeconds: StateFlow<Int> = _listenElapsedSeconds.asStateFlow()
+
+    private var cachedTopTracks: List<HomeTrack> = emptyList()
+
+    private val _rows = MutableStateFlow<List<HomeRow>>(emptyList())
+
+    /** The current tab's rows, pre-computed off the main thread.
+     *  [HomeUiState.visibleRows] filters/groups/sorts the full track
+     *  history — with thousands of scrobbles that's real CPU work, and
+     *  running it inline inside a Compose `remember` block (as this used
+     *  to) ran it on the UI thread every time a new track scrobbled in,
+     *  which is exactly when Last.fm polling ticks — causing a visible
+     *  stutter on Home right as a track changed. Recomputing it here on
+     *  Dispatchers.Default and just handing the UI a finished list keeps
+     *  that work off the frame budget entirely. */
+    val rows: StateFlow<List<HomeRow>> = _rows.asStateFlow()
+
+    init {
+        loadInitial()
+        // Last.fm connect/disconnect in Settings must switch Stats between
+        // global and local modes without an app restart.
+        viewModelScope.launch {
+            // Skip the very first emission: loadInitial() already covers the
+            // startup session. Every later change is a real connect/disconnect.
+            var isFirstEmission = true
+            sessionPreferences.session
+                .map { it.username }
+                .distinctUntilChanged()
+                .collect { latestUsername ->
+                    if (isFirstEmission) {
+                        isFirstEmission = false
+                        return@collect
+                    }
+                    val current = _uiState.value
+                    // While viewing a friend, own-session changes must not
+                    // hijack the friend's screen.
+                    if (current.isViewingFriend) return@collect
+                    if (latestUsername == current.username) return@collect
+                    // Own profile changed: keep `username` (signed-in identity)
+                    // and `viewingUsername` (displayed account) in lockstep so
+                    // isViewingFriend stays false for own data.
+                    _uiState.update { it.copy(username = latestUsername) }
+                    if (!isLastFmUsername(latestUsername)) {
+                        launch(Dispatchers.IO) { loadLocalStats(latestUsername) }
+                    } else {
+                        loadForUsername(latestUsername)
+                    }
+                }
+        }
+        viewModelScope.launch {
+            settingsPreferences.settings.collect { misc ->
+                _uiState.update { it.copy(pinnedFriends = misc.pinnedFriends) }
+            }
+        }
+        viewModelScope.launch {
+            scrobbleRepository.scrobbleEvents.collect {
+                // Instantly update recent tracks list and scrobble count when a track scrobbles
+                delay(1200L)
+                refreshSilently()
+            }
+        }
+        viewModelScope.launch {
+            uiState
+                .map {
+                    RowsKey(
+                        allTracks = it.allTracks,
+                        sortMode = it.sortMode,
+                        nowPlaying = it.nowPlaying,
+                        topTracksOverall = it.topTracksOverall,
+                        topTracks7Days = it.topTracks7Days,
+                        topTracks30Days = it.topTracks30Days,
+                        topArtists = it.topArtists,
+                        topAlbums = it.topAlbums,
+                    )
+                }
+                .distinctUntilChanged()
+                .collectLatest { key ->
+                    val computed = withContext(Dispatchers.Default) {
+                        HomeUiState(
+                            allTracks = key.allTracks,
+                            sortMode = key.sortMode,
+                            nowPlaying = key.nowPlaying,
+                            topTracksOverall = key.topTracksOverall,
+                            topTracks7Days = key.topTracks7Days,
+                            topTracks30Days = key.topTracks30Days,
+                            topArtists = key.topArtists,
+                            topAlbums = key.topAlbums,
+                        ).visibleRows()
+                    }
+                    _rows.value = computed
+                }
+        }
+    }
+
+    /** Dynamic Now Playing Theme (§5): tells ThemeRepository what track is
+     *  currently playing so it can resolve real artwork (through the same
+     *  Last.fm -> iTunes fallback every other screen uses) and extract an
+     *  accent color from it. Cheap and safe to call every time nowPlaying is
+     *  (re)computed, including from every poll tick — ThemeRepository
+     *  dedupes on the track's cache key internally, so this only triggers
+     *  real work when the track actually changes. */
+    private fun notifyNowPlayingArtwork(track: HomeTrack?) {
+        themeRepository.updateNowPlayingArtwork(track?.name, track?.artist)
+    }
+
+    private fun mergeRecentWithTop(
+        nowPlaying: RecentTrack?,
+        recent: List<RecentTrack>,
+        topTracks: List<HomeTrack>,
+        previousNowPlaying: HomeTrack? = _uiState.value.nowPlaying,
+    ): Pair<HomeTrack?, List<HomeTrack>> {
+        val topCountByKey = topTracks.associate { "${it.name.lowercase()}|${it.artist.lowercase()}" to it.playCount }
+        val recentAsHome = recent.map { t ->
+            val safeArtist = t.artist.displayName.takeIf { !com.rushtify.app.util.ArtistHelper.isPlayCountOrStat(it) } ?: ""
+            val key = "${t.name.lowercase()}|${safeArtist.lowercase()}"
+            HomeTrack(
+                name = t.name,
+                artist = safeArtist,
+                artworkUrl = t.artworkUrl,
+                timestampMillis = t.date?.uts?.toLongOrNull()?.times(1000),
+                playCount = topCountByKey[key] ?: 0,
+            )
+        }
+        val recentKeys = recentAsHome.map { it.key }.toSet()
+        val extra = topTracks.filter { it.key !in recentKeys }
+        val nowPlayingHome = nowPlaying?.let { np ->
+            // Keep the previous HomeTrack instance structurally identical when
+            // the same track is still playing: stamping a fresh wall-clock
+            // timestamp on every 12s poll changed the data-class identity and
+            // forced every downstream remember/derive on Home to recompute.
+            val previous = previousNowPlaying
+            val safeNpArtist = np.artist.displayName.takeIf { !com.rushtify.app.util.ArtistHelper.isPlayCountOrStat(it) } ?: ""
+            val sameTrackStillPlaying = previous != null && previous.isNowPlaying &&
+                previous.name.equals(np.name, ignoreCase = true) &&
+                previous.artist.equals(safeNpArtist, ignoreCase = true)
+            HomeTrack(
+                name = np.name,
+                artist = safeNpArtist,
+                artworkUrl = np.artworkUrl,
+                timestampMillis = if (sameTrackStillPlaying && previous != null) previous.timestampMillis else System.currentTimeMillis(),
+                playCount = 0,
+                isNowPlaying = true,
+            )
+        }
+        return nowPlayingHome to (recentAsHome + extra)
+    }
+
+    private fun loadInitial() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isLoading = true, error = null) }
+            val username = sessionPreferences.session.first().username
+            if (!isLastFmUsername(username)) {
+                loadLocalStats(username)
+                return@launch
+            }
+            val result = homeRepository.fetchInitialData()
+            result.fold(
+                onSuccess = { data ->
+                    cachedTopTracks = data.topTracks
+                    val (nowPlaying, merged) = mergeRecentWithTop(data.recent.nowPlaying, data.recent.tracks, data.topTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            username = username,
+                            viewingUsername = username,
+                            stats = data.stats,
+                            nowPlaying = nowPlaying,
+                            allTracks = merged,
+                            topTracksOverall = data.topTracks,
+                            page = data.recent.page,
+                            totalPages = data.recent.totalPages,
+                            isLocalStatsMode = false,
+                        )
+                    }
+                    preloadPeriodTracks()
+                    preloadTopMeta(username)
+                },
+                onFailure = { e ->
+                    // Last.fm unreachable (offline / rate-limited): degrade to
+                    // local stats rather than leaving Stats empty.
+                    runCatching { localStatsRepository.load() }.getOrNull()?.let { local ->
+                        cachedTopTracks = local.topTracks
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                username = username,
+                                viewingUsername = username,
+                                stats = local.stats,
+                                nowPlaying = null,
+                                allTracks = local.topTracks,
+                                topTracksOverall = local.topTracks,
+                                topArtists = local.topArtists.take(10),
+                                topAlbums = local.topAlbums.take(10),
+                                page = 1,
+                                totalPages = 1,
+                                sortMode = HomeSortMode.MOST_PLAYED,
+                                isLocalStatsMode = true,
+                                error = null,
+                            )
+                        }
+                        preloadLocalTags()
+                    } ?: _uiState.update {
+                        it.copy(isLoading = false, username = username, viewingUsername = username, error = e.message ?: "Couldn't load your data")
+                    }
+                },
+            )
+        }
+    }
+
+    /**
+     * Local Stats Mode: aggregates plays, top artists/tracks, and listening
+     * time directly from the local Room database (saved playlists + liked +
+     * downloads). Used when Last.fm is NOT connected (guest/disconnected).
+     */
+    private suspend fun loadLocalStats(username: String) {
+        val local = runCatching { localStatsRepository.load() }.getOrNull()
+        if (local == null) {
+            _uiState.update {
+                it.copy(
+                    isLoading = false,
+                    username = username,
+                    viewingUsername = username,
+                    stats = null,
+                    allTracks = emptyList(),
+                    topTracksOverall = emptyList(),
+                    isLocalStatsMode = true,
+                    error = "Couldn't load local stats",
+                )
+            }
+            return
+        }
+        cachedTopTracks = local.topTracks
+        _uiState.update {
+            it.copy(
+                isLoading = false,
+                username = username,
+                viewingUsername = username,
+                stats = local.stats,
+                nowPlaying = null,
+                // Local tracks carry no timestamps, so default to Most Played
+                // (Recent would filter everything out).
+                sortMode = HomeSortMode.MOST_PLAYED,
+                allTracks = local.topTracks,
+                topTracksOverall = local.topTracks,
+                topTracks7Days = emptyList(),
+                topTracks30Days = emptyList(),
+                topArtists = local.topArtists.take(10),
+                topAlbums = local.topAlbums.take(10),
+                page = 1,
+                totalPages = 1,
+                isLocalStatsMode = true,
+                error = null,
+            )
+        }
+        preloadLocalTags()
+    }
+
+    /** Genre chips from the taste profile (Last.fm tags or chart defaults for
+     *  guests). Never fails the Stats screen — empty means hide the row. */
+    private fun preloadLocalTags() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val tags = runCatching { tasteProfileProvider.get().topTags.toList() }
+                .getOrDefault(emptyList()).take(8)
+            _uiState.update { it.copy(topTags = tags) }
+        }
+    }
+
+    /** Podium meta for a connected Last.fm account: top artists + albums for
+     *  [username] (own or friend) plus own taste tags. Each fetch fails
+     *  independently so one flaky call never clears the others. */
+    private fun preloadTopMeta(username: String, period: String = "overall") {
+        viewModelScope.launch(Dispatchers.IO) {
+            homeRepository.fetchTopArtistsForPeriod(period, 10, username = username)
+                .onSuccess { artists -> _uiState.update { it.copy(topArtists = artists.take(10)) } }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            homeRepository.fetchTopAlbums(period = period, limit = 10, username = username)
+                .onSuccess { albums -> _uiState.update { it.copy(topAlbums = albums.take(10)) } }
+        }
+        // Tags are personal (own taste), not the viewed friend's.
+        if (!isLastFmUsername(_uiState.value.username)) {
+            preloadLocalTags()
+            return
+        }
+        if (_uiState.value.isViewingFriend) {
+            _uiState.update { it.copy(topTags = emptyList()) }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val tags = runCatching { tasteProfileProvider.get().topTags.toList() }
+                .getOrDefault(emptyList()).take(8)
+            _uiState.update { it.copy(topTags = tags) }
+        }
+    }
+
+    private fun preloadPeriodTracks() {
+        val target = _uiState.value.viewingUsername
+        viewModelScope.launch(Dispatchers.IO) {
+            homeRepository.fetchTopTracksForPeriod("7day", 50, username = target).onSuccess { tracks ->
+                _uiState.update { it.copy(topTracks7Days = tracks) }
+            }
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            homeRepository.fetchTopTracksForPeriod("1month", 50, username = target).onSuccess { tracks ->
+                _uiState.update { it.copy(topTracks30Days = tracks) }
+            }
+        }
+    }
+
+    fun refresh() {
+        // Local mode pull-to-refresh reloads Room, not Last.fm.
+        if (_uiState.value.isLocalStatsMode && !_uiState.value.isViewingFriend) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(isRefreshing = true) }
+                try {
+                    val local = localStatsRepository.load()
+                    cachedTopTracks = local.topTracks
+                    val tags = runCatching { tasteProfileProvider.get().topTags.toList() }
+                        .getOrDefault(emptyList()).take(8)
+                    _uiState.update {
+                        it.copy(
+                            isRefreshing = false,
+                            stats = local.stats,
+                            allTracks = local.topTracks,
+                            topTracksOverall = local.topTracks,
+                            topArtists = local.topArtists.take(10),
+                            topAlbums = local.topAlbums.take(10),
+                            topTags = tags,
+                            error = null,
+                        )
+                    }
+                } catch (e: Exception) {
+                    _uiState.update { it.copy(isRefreshing = false, error = e.message) }
+                }
+            }
+            return
+        }
+        val target = _uiState.value.viewingUsername
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(isRefreshing = true) }
+            try {
+                val recent = homeRepository.fetchRecentTracks(username = target, forceRefresh = true)
+                val statsResult = homeRepository.fetchStats(username = target, forceRefresh = true)
+                recent.fold(
+                    onSuccess = { page ->
+                        val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                        notifyNowPlayingArtwork(nowPlaying)
+                        val freshStats = statsResult.getOrNull()
+                        _uiState.update { state ->
+                            val baseStats = freshStats ?: state.stats
+                            val resolvedStats = if (baseStats != null && baseStats.scrobbles <= 0L && page.totalScrobbles > 0L) {
+                                baseStats.copy(scrobbles = page.totalScrobbles)
+                            } else baseStats
+                            state.copy(
+                                isRefreshing = false,
+                                stats = resolvedStats,
+                                nowPlaying = nowPlaying,
+                                allTracks = merged,
+                                page = page.page,
+                                totalPages = page.totalPages,
+                                error = null,
+                            )
+                        }
+                        preloadPeriodTracks()
+                    },
+                    onFailure = { e -> _uiState.update { it.copy(isRefreshing = false, error = e.message) } },
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isRefreshing = false, error = e.message) }
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
+            }
+        }
+    }
+
+    private var pageLoadInFlight = false
+
+    fun loadNextPage() {
+        val current = _uiState.value
+        if (current.page >= current.totalPages) return
+        // One page request at a time: oscillation around the "near end"
+        // scroll threshold used to fire duplicate concurrent requests for
+        // the same page while the first fetch was still in flight.
+        if (pageLoadInFlight) return
+        pageLoadInFlight = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                homeRepository.fetchRecentTracks(page = current.page + 1, username = current.viewingUsername).onSuccess { page ->
+                    val (_, merged) = mergeRecentWithTop(null, page.tracks, cachedTopTracks)
+                    _uiState.update { state ->
+                        val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
+                        val newOnes = merged.filter { (it.key to it.timestampMillis) !in existingKeys }
+                        state.copy(
+                            allTracks = state.allTracks + newOnes,
+                            page = page.page,
+                            totalPages = page.totalPages,
+                        )
+                    }
+                }
+            } finally {
+                pageLoadInFlight = false
+            }
+        }
+    }
+
+    fun setSortMode(mode: HomeSortMode) {
+        _uiState.update { it.copy(sortMode = mode) }
+        val target = _uiState.value.viewingUsername
+        
+        val period = when (mode) {
+            HomeSortMode.RECENT, HomeSortMode.MOST_PLAYED, HomeSortMode.TOP_ALBUMS, HomeSortMode.TOP_ARTISTS -> "overall"
+            HomeSortMode.LAST_7_DAYS -> "7day"
+            HomeSortMode.LAST_30_DAYS -> "1month"
+        }
+        if (!_uiState.value.isLocalStatsMode) {
+            preloadTopMeta(target, period)
+        }
+        
+        if (mode == HomeSortMode.LAST_7_DAYS && _uiState.value.topTracks7Days.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                homeRepository.fetchTopTracksForPeriod("7day", 50, username = target).onSuccess { tracks ->
+                    _uiState.update { it.copy(topTracks7Days = tracks) }
+                }
+            }
+        } else if (mode == HomeSortMode.LAST_30_DAYS && _uiState.value.topTracks30Days.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                homeRepository.fetchTopTracksForPeriod("1month", 50, username = target).onSuccess { tracks ->
+                    _uiState.update { it.copy(topTracks30Days = tracks) }
+                }
+            }
+        }
+    }
+
+    /** Opens the friend-switcher sheet — lazily loads the signed-in user's
+     *  own friends list (user.getfriends) the first time it's opened. */
+    fun openFriendsSheet() {
+        _uiState.update { it.copy(showFriendsSheet = true) }
+        if (_uiState.value.friends.isEmpty()) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(isLoadingFriends = true) }
+                homeRepository.fetchFriends().fold(
+                    onSuccess = { list -> _uiState.update { it.copy(friends = list, isLoadingFriends = false) } },
+                    onFailure = { _uiState.update { it.copy(isLoadingFriends = false) } },
+                )
+            }
+        }
+    }
+
+    fun dismissFriendsSheet() {
+        _uiState.update { it.copy(showFriendsSheet = false) }
+    }
+
+    fun toggleFriendPinned(username: String) {
+        viewModelScope.launch { settingsPreferences.toggleFriendPinned(username) }
+    }
+
+    /** Switches the whole Home screen over to a friend's data — every
+     *  fetch (recent tracks, stats, top tracks for every period) re-runs
+     *  for [friend]'s username instead of the signed-in one. */
+    fun viewFriend(friend: FriendEntry) {
+        _uiState.update { it.copy(showFriendsSheet = false) }
+        viewingProfileState.set(friend.name)
+        loadForUsername(friend.name)
+    }
+
+    /** Switches back to the signed-in user's own data. */
+    fun returnToOwnProfile() {
+        viewingProfileState.set(null)
+        loadForUsername(_uiState.value.username)
+    }
+
+    private fun loadForUsername(username: String) {
+        // Blank / "Guest User" is never a friend's name — it is always your
+        // own disconnected profile, so it always means local mode (this also
+        // covers returnToOwnProfile() after a disconnect).
+        if (!isLastFmUsername(username)) {
+            viewModelScope.launch(Dispatchers.IO) {
+                _uiState.update { it.copy(isLoading = true, error = null, viewingUsername = username) }
+                loadLocalStats(username)
+            }
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update {
+                it.copy(
+                    isLoading = true,
+                    error = null,
+                    viewingUsername = username,
+                    // Reset period caches from the previous account — the
+                    // 7-day/30-day tabs would otherwise briefly show the
+                    // last-viewed account's tracks under the new one's name.
+                    topTracks7Days = emptyList(),
+                    topTracks30Days = emptyList(),
+                )
+            }
+            val result = homeRepository.fetchInitialData(username = username)
+            result.fold(
+                onSuccess = { data ->
+                    cachedTopTracks = data.topTracks
+                    val (nowPlaying, merged) = mergeRecentWithTop(data.recent.nowPlaying, data.recent.tracks, data.topTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            stats = data.stats,
+                            nowPlaying = nowPlaying,
+                            allTracks = merged,
+                            topTracksOverall = data.topTracks,
+                            page = data.recent.page,
+                            totalPages = data.recent.totalPages,
+                            isLocalStatsMode = false,
+                        )
+                    }
+                    preloadPeriodTracks()
+                    preloadTopMeta(username)
+                },
+                onFailure = { e ->
+                    // Own profile failing (e.g. key removed while signed in)
+                    // degrades to local mode; friend failures stay errors.
+                    if (!_uiState.value.isViewingFriend) {
+                        runCatching { localStatsRepository.load() }.getOrNull()?.let { local ->
+                            cachedTopTracks = local.topTracks
+                            _uiState.update {
+                                it.copy(
+                                    isLoading = false,
+                                    stats = local.stats,
+                                    nowPlaying = null,
+                                    allTracks = local.topTracks,
+                                    topTracksOverall = local.topTracks,
+                                    topArtists = local.topArtists.take(10),
+                                    topAlbums = local.topAlbums.take(10),
+                                    sortMode = HomeSortMode.MOST_PLAYED,
+                                    isLocalStatsMode = true,
+                                    error = null,
+                                )
+                            }
+                            preloadLocalTags()
+                        } ?: _uiState.update {
+                            it.copy(isLoading = false, error = e.message ?: "Couldn't load that profile")
+                        }
+                    } else {
+                        _uiState.update { it.copy(isLoading = false, error = e.message ?: "Couldn't load that profile") }
+                    }
+                },
+            )
+        }
+    }
+
+    fun refreshSilently() {
+        // Local mode: refresh Room aggregates (cheap) instead of polling Last.fm.
+        if (_uiState.value.isLocalStatsMode && !_uiState.value.isViewingFriend) {
+            viewModelScope.launch(Dispatchers.IO) {
+                runCatching { localStatsRepository.load() }.onSuccess { local ->
+                    cachedTopTracks = local.topTracks
+                    _uiState.update {
+                        it.copy(
+                            stats = local.stats,
+                            allTracks = local.topTracks,
+                            topTracksOverall = local.topTracks,
+                            topArtists = local.topArtists.take(10),
+                            topAlbums = local.topAlbums.take(10),
+                        )
+                    }
+                }
+                val tags = runCatching { tasteProfileProvider.get().topTags.toList() }
+                    .getOrDefault(emptyList()).take(8)
+                _uiState.update { it.copy(topTags = tags) }
+            }
+            return
+        }
+        val target = _uiState.value.viewingUsername
+        if (target.isBlank() || target.equals("Guest User", ignoreCase = true)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                var recentTotalScrobbles = 0L
+                val recent = homeRepository.fetchRecentTracks(username = target, forceRefresh = true)
+                recent.onSuccess { page ->
+                    recentTotalScrobbles = page.totalScrobbles
+                    val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                    notifyNowPlayingArtwork(nowPlaying)
+                    _uiState.update { state ->
+                        val baseStats = state.stats
+                        val resolvedStats = if (baseStats != null && baseStats.scrobbles <= 0L && page.totalScrobbles > 0L) {
+                            baseStats.copy(scrobbles = page.totalScrobbles)
+                        } else baseStats
+                        state.copy(
+                            stats = resolvedStats,
+                            nowPlaying = nowPlaying,
+                            allTracks = merged,
+                            page = page.page,
+                            totalPages = page.totalPages,
+                        )
+                    }
+                }
+                homeRepository.fetchStats(username = target, forceRefresh = true).onSuccess { freshStats ->
+                    _uiState.update { state ->
+                        val finalScrobbles = when {
+                            freshStats.scrobbles > 0L -> freshStats.scrobbles
+                            recentTotalScrobbles > 0L -> recentTotalScrobbles
+                            (state.stats?.scrobbles ?: 0L) > 0L -> state.stats!!.scrobbles
+                            else -> 0L
+                        }
+                        val resolved = if (freshStats.scrobbles <= 0L && finalScrobbles > 0L) {
+                            freshStats.copy(scrobbles = finalScrobbles)
+                        } else freshStats
+                        state.copy(stats = resolved)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Runs the now-playing + recent-tracks + listen-timer loops concurrently.
+     *  Call from a lifecycle-aware LaunchedEffect(repeatOnLifecycle(STARTED))
+     *  so polling stops the moment the screen backgrounds. Polls whichever
+     *  account is currently being viewed (yours, or a friend's). */
+    suspend fun pollWhileActive() = coroutineScope {
+        // Immediately fetch newest tracks and stats on opening/returning to Home screen
+        refreshSilently()
+
+        launch {
+            while (true) {
+                delay(NOW_PLAYING_POLL_MS)
+                val target = _uiState.value.viewingUsername
+                if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
+                    val result = runCatching { homeRepository.fetchRecentTracks(limit = 2, username = target, forceRefresh = true) }.getOrNull()
+                    result?.onSuccess { page ->
+                        val (nowPlaying, _) = mergeRecentWithTop(page.nowPlaying, emptyList(), cachedTopTracks)
+                        val previousNp = _uiState.value.nowPlaying
+                        val trackEnded = previousNp != null && nowPlaying == null
+                        val trackChanged = (previousNp?.name != nowPlaying?.name || previousNp?.artist != nowPlaying?.artist)
+
+                        notifyNowPlayingArtwork(nowPlaying)
+                        if (trackChanged) _listenElapsedSeconds.value = 0
+                        _uiState.update { state ->
+                            state.copy(nowPlaying = nowPlaying)
+                        }
+                        // When a track finishes or changes, auto-refresh recent tracks list immediately
+                        if (trackEnded || (trackChanged && previousNp != null)) {
+                            refreshSilently()
+                        }
+                    }?.onFailure {
+                        // On error or rate limit, back off for 15 seconds before retrying
+                        delay(15_000L)
+                    }
+                }
+            }
+        }
+        launch {
+            while (true) {
+                delay(RECENT_TRACKS_POLL_MS)
+                val target = _uiState.value.viewingUsername
+                if (target.isNotBlank() && !target.equals("Guest User", ignoreCase = true)) {
+                    val result = runCatching { homeRepository.fetchRecentTracks(username = target, forceRefresh = true) }.getOrNull()
+                    result?.onSuccess { page ->
+                        val (nowPlaying, merged) = mergeRecentWithTop(page.nowPlaying, page.tracks, cachedTopTracks)
+                        notifyNowPlayingArtwork(nowPlaying)
+                        _uiState.update { state ->
+                            val recentOnly = merged.filter { it.timestampMillis != null }
+                            val existingKeys = state.allTracks.map { it.key to it.timestampMillis }.toSet()
+                            val newOnes = recentOnly.filter { (it.key to it.timestampMillis) !in existingKeys }
+                            val combined = (newOnes + state.allTracks)
+                                .distinctBy { it.key to it.timestampMillis }
+                                .take(HOME_TRACK_HISTORY_CAP)
+                            val baseStats = state.stats
+                            val resolvedStats = if (baseStats != null && baseStats.scrobbles <= 0L && page.totalScrobbles > 0L) {
+                                baseStats.copy(scrobbles = page.totalScrobbles)
+                            } else baseStats
+                            state.copy(stats = resolvedStats, nowPlaying = nowPlaying, allTracks = combined, totalPages = page.totalPages)
+                        }
+                    }?.onFailure {
+                        // On error or rate limit, back off for 20 seconds before retrying
+                        delay(20_000L)
+                    }
+                }
+            }
+        }
+        launch {
+            while (true) {
+                delay(LISTEN_TICK_MS)
+                if (_uiState.value.nowPlaying != null) {
+                    _listenElapsedSeconds.update { it + 1 }
+                }
+            }
+        }
+    }
+
+    fun dismissError() = _uiState.update { it.copy(error = null) }
+}

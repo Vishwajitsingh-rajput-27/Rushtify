@@ -1,0 +1,31 @@
+pluginManagement {
+    buildscript {
+        repositories {
+            google()
+            mavenCentral()
+            maven { url = uri("https://storage.googleapis.com/r8-releases/raw") }
+        }
+        dependencies {
+            classpath("com.android.tools:r8:9.4.14")
+        }
+    }
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url = uri("https://storage.googleapis.com/r8-releases/raw") }
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+        maven("https://jitpack.io")
+    }
+}
+
+rootProject.name = "Rushtify"
+include(":app")
+include(":audio:decent-usb-audio-driver")
+include(":audio:decent-usb-audio-wrapper-media3")

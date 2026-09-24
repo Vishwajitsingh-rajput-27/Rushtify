@@ -1,0 +1,89 @@
+package com.rushtify.app.ui.theme
+
+import android.app.Activity
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
+import com.rushtify.app.data.repository.ThemeUiState
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.staticCompositionLocalOf
+import com.rushtify.app.data.local.ThemeMode
+
+/** Shared composition local indicating whether the active theme is dark mode. */
+val LocalIsDarkTheme = staticCompositionLocalOf { true }
+
+/**
+ * Wraps the whole app. Supports System Default, Light, and Dark modes.
+ * Kyant0 Backdrop captures underlying content into a hardware-accelerated layer
+ * shared app-wide; screens add their own sibling sources for local content
+ * (nav bar, player, headers).
+ */
+@Composable
+fun RushtifyTheme(
+    themeState: ThemeUiState,
+    content: @Composable () -> Unit,
+) {
+    val isSystemDark = isSystemInDarkTheme()
+    val isDark = when (themeState.themeMode) {
+        ThemeMode.SYSTEM -> isSystemDark
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+    }
+    val activeColorScheme = if (isDark) themeState.darkColorScheme else themeState.lightColorScheme
+
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            runCatching {
+                window.statusBarColor = android.graphics.Color.TRANSPARENT
+                window.navigationBarColor = android.graphics.Color.TRANSPARENT
+                WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !isDark
+                WindowCompat.getInsetsController(window, view).isAppearanceLightNavigationBars = !isDark
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                    window.isStatusBarContrastEnforced = false
+                    window.isNavigationBarContrastEnforced = false
+                }
+            }
+        }
+    }
+
+    MaterialTheme(
+        colorScheme = activeColorScheme,
+        typography = if (themeState.useCustomFont) RushtifyTypography else SystemTypography,
+        shapes = RushtifyShapes,
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            CompositionLocalProvider(
+                LocalLiquidGlass provides themeState.liquidGlass,
+                LocalIsDarkTheme provides isDark,
+            ) {
+                if (isLiquidGlassBackdropSupported()) {
+                    val backgroundColor = MaterialTheme.colorScheme.background
+                    val backgroundBackdrop = rememberLayerBackdrop {
+                        drawRect(backgroundColor)
+                        drawContent()
+                    }
+                    CompositionLocalProvider(
+                        LocalLiquidGlassBackdrop provides backgroundBackdrop,
+                        LocalLiquidGlassOverlayBackdrop provides backgroundBackdrop,
+                    ) {
+                        content()
+                    }
+                } else {
+                    content()
+                }
+            }
+        }
+    }
+}

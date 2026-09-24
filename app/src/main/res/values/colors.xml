@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- hsl(0, 5%, 6%): the same formula Md3SchemeBuilder uses for the md
+         background token, evaluated at the default hue so the splash screen
+         never flashes a mismatched color. -->
+    <color name="splash_background">#FF100F0F</color>
+
+    <!-- Rushtify brand badge navy (from the official logotype sheet):
+         the badge behind the R-and-arrow mark. Used as the adaptive icon's
+         background layer, paired with ic_launcher_foreground. -->
+    <color name="ic_launcher_background">#FF0A214B</color>
+</resources>
