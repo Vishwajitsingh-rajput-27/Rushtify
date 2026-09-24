@@ -68,7 +68,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Rushtify.Splash"
+        android:theme="@style/Theme.Rushtify"
         android:usesCleartextTraffic="false"
         android:localeConfig="@xml/locales_config"
         android:hardwareAccelerated="true"
@@ -89,7 +89,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
-            android:theme="@style/Theme.Rushtify.Splash"
+            android:theme="@style/Theme.Rushtify"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize">
 
