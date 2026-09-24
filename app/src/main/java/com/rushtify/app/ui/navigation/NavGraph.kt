@@ -178,7 +178,10 @@ fun RushtifyNavHost(
 
     NavHost(
         navController = navController,
-        startDestination = Screen.Splash.route,
+        // Render the real app immediately. Authentication and background
+        // services remain available from their normal screens, but they must
+        // not hold the first Home frame behind a branded loading gate.
+        startDestination = Screen.MainShell.route,
         enterTransition = { ExpressiveMotion.forwardEnter() },
         exitTransition = { ExpressiveMotion.forwardExit() },
         popEnterTransition = { ExpressiveMotion.backEnter() },
