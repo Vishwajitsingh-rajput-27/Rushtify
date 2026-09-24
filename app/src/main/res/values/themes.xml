@@ -2,6 +2,15 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base theme while Compose hosts the UI: no action bar, transparent bars. -->
     <style name="Theme.Rushtify" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Draw the final dark surface as the starting window so Android
+             never shows a white preview while Compose is initializing. -->
+        <item name="android:windowBackground">@color/splash_background</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="s">@color/splash_background</item>
+        <!-- Android 12+ requires a splash icon; keep it transparent so the
+             app opens as a dark window instead of briefly showing the logo. -->
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="s">@drawable/transparent_splash_icon</item>
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
@@ -26,9 +35,9 @@
          flash before Compose draws. -->
     <style name="Theme.Rushtify.Splash" parent="Theme.Rushtify">
         <item name="android:windowSplashScreenBackground" tools:targetApi="s">@color/splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="s">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="s">@drawable/transparent_splash_icon</item>
         <item name="postSplashScreenTheme">@style/Theme.Rushtify</item>
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/transparent_splash_icon</item>
     </style>
 </resources>
