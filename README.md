@@ -165,7 +165,11 @@ bash ./gradlew assembleRelease
 
 Release signing depends on the signing configuration supplied to the local build environment. Do not commit private signing keys, passwords, API keys, or generated local configuration files.
 
+<div align="left">
+
 ## Project Structure
+
+The original user-provided tree was:
 
 ```text
 Rushtify/
@@ -197,6 +201,8 @@ Rushtify/
 ├── gradlew.bat
 └── settings.gradle.kts
 ```
+
+</div>
 
 ## Configuration and Privacy
 
