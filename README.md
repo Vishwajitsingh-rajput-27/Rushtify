@@ -168,20 +168,34 @@ Release signing depends on the signing configuration supplied to the local build
 ## Project Structure
 
 ```text
-rushtify/
+Rushtify/
+├── .github/
+│   └── workflows/
+├── .glance_core/
+├── .glance_temp/
+├── Screenshot/
 ├── app/
-│   └── src/main/
-│       ├── java/com/rushtify/app/
-│       │   ├── data/          # Repositories, APIs, Room, downloads, lyrics
-│       │   ├── playback/      # Media3 player and playback services
-│       │   ├── ui/            # Compose screens and ViewModels
-│       │   └── util/          # Shared Android utilities
-│       ├── cpp/               # Native audio components
-│       └── res/               # Icons, fonts, strings, themes, and resources
-├── audio/                     # USB audio support modules
-├── Screenshot/                # Project screenshots
-├── tools/                     # Build and native-secret helper scripts
-└── gradle/                    # Gradle wrapper and version catalog
+│   └── src/
+│       └── main/
+│           ├── java/com/rushtify/app/
+│           │   ├── data/
+│           │   ├── playback/
+│           │   ├── ui/
+│           │   └── util/
+│           ├── cpp/
+│           └── res/
+├── audio/
+├── gradle/
+├── tools/
+├── .env.example
+├── .gitignore
+├── LICENSE
+├── README.md
+├── build.gradle.kts
+├── gradle.properties
+├── gradlew
+├── gradlew.bat
+└── settings.gradle.kts
 ```
 
 ## Configuration and Privacy
