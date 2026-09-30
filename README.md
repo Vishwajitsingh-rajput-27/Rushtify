@@ -3,6 +3,10 @@
 <img src="https://img.shields.io/badge/Rushtify-Android%20Music%20Player-0B1F4D?style=for-the-badge&logo=android&logoColor=white" alt="Rushtify" />
 
 <p align="center">
+  <img src="./Screenshot/poster.png" alt="Rushtify Poster" width="800">
+</p>
+
+<p align="center">
   <a href="https://github.com/Vishwajitsingh-rajput-27/Rushtify/releases/latest/download/Rushtify-v1.0.0.apk">
     <img src="https://img.shields.io/badge/⬇%20DOWNLOAD%20APK-ANDROID%20APP-2ea44f?style=for-the-badge&logo=android&logoColor=white" alt="Download Rushtify APK">
   </a>
