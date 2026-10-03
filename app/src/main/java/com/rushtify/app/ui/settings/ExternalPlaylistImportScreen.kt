@@ -48,13 +48,11 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalClipboardManager
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
@@ -71,8 +69,6 @@ import com.rushtify.app.ui.common.adaptiveContentWidth
 import com.rushtify.app.ui.common.groupPositionFor
 import com.rushtify.app.ui.common.groupShape
 import com.rushtify.app.ui.player.LocalMiniPlayerScrollClearance
-import androidx.browser.customtabs.CustomTabsIntent
-import android.net.Uri
 
 /** How many preview rows are listed before a "+N more tracks" footer. */
 private const val PREVIEW_ROW_LIMIT = 50
@@ -96,17 +92,6 @@ fun ExternalPlaylistImportScreen(
     val clipboard = LocalClipboardManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val haptic = LocalHapticFeedback.current
-    val context = LocalContext.current
-
-    LaunchedEffect(state.spotifyAuthorizationUrl) {
-        val url = state.spotifyAuthorizationUrl ?: return@LaunchedEffect
-        runCatching {
-            CustomTabsIntent.Builder().build().launchUrl(context, Uri.parse(url))
-        }.onFailure { error ->
-            viewModel.showError(error.localizedMessage ?: "Couldn't open Spotify sign-in.")
-        }
-        viewModel.clearSpotifyAuthorizationUrl()
-    }
 
     val preview = state.preview
     val rows = preview?.rows.orEmpty()
@@ -143,22 +128,12 @@ fun ExternalPlaylistImportScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Import Spotify playlists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Import a Spotify account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Connect Spotify to load playlists in your library, including public playlists created by other people and collaborative playlists. Spotify may restrict tracks from private playlists owned by others unless you collaborate on them. Access is read-only; selected playlists are imported into Rushtify.",
+                                "Enter a Spotify username to find playlists created by that user and public playlists saved by that user, then import all of them at once. Private playlists and Liked Songs are not visible without Spotify authorization.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            Button(
-                                onClick = viewModel::connectSpotifyLibrary,
-                                enabled = !state.isLoadingSpotifyAccount && !state.isImporting,
-                                shape = CircleShape,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                if (state.isLoadingSpotifyAccount) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                else Text(if (state.spotifyLibraryConnected) "Reconnect Spotify and refresh library" else "Connect Spotify & load library")
-                            }
-                            Text("Or find only public playlists visible on a profile by username:", style = MaterialTheme.typography.bodySmall)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedTextField(
                                     value = state.spotifyUsername,
@@ -186,17 +161,8 @@ fun ExternalPlaylistImportScreen(
                     item {
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(
-                                    if (state.spotifyLibraryConnected) "${state.spotifyPlaylists.size} playlists in your library"
-                                    else "${state.spotifyPlaylists.size} public playlists on profile",
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Text(
-                                    if (state.spotifyLibraryConnected) "Includes followed playlists owned by other people • all selected by default"
-                                    else "Profile-visible playlists only • all selected by default",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Text("${state.spotifyPlaylists.size} created and saved playlists", fontWeight = FontWeight.Bold)
+                                Text("Created by you and public playlists saved by you • all selected by default", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             androidx.compose.material3.TextButton(onClick = {
                                 val allSelected = state.selectedSpotifyPlaylistIds.size == state.spotifyPlaylists.size

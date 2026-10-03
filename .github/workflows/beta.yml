@@ -15,7 +15,6 @@ jobs:
       contents: write
     env:
       SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
-      SPOTIFY_CLIENT_ID: ${{ vars.SPOTIFY_CLIENT_ID }}
 
     steps:
       - name: Checkout code

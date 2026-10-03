@@ -29,29 +29,8 @@ class SpotifyPlaylistImporterTest {
         assertEquals("Morning Mix", playlists.single { it.id == "abc123" }.title)
         assertEquals("Road Trip", playlists.single { it.id == "def456" }.title)
         assertEquals(SpotifyPlaylistKind.CREATED, playlists.single { it.id == "abc123" }.kind)
-        assertEquals(SpotifyPlaylistKind.OTHER_OWNER, playlists.single { it.id == "def456" }.kind)
+        assertEquals(SpotifyPlaylistKind.SAVED, playlists.single { it.id == "def456" }.kind)
         assertTrue(playlists.single { it.id == "ghi789" }.title.isNotBlank())
-        assertEquals(SpotifyPlaylistKind.PUBLIC, playlists.single { it.id == "ghi789" }.kind)
-    }
-
-    @Test
-    fun includesOtherOwnersAcrossProfilePayloadsAndLocalizedPlaylistLinks() {
-        val html = """
-            <script type="application/json">
-              {"items":[{"uri":"spotify:playlist:first123","name":"Made by account","owner":{"uri":"spotify:user:alice"}}]}
-            </script>
-            <script type="application/json">
-              {"items":[{"uri":"spotify:playlist:other456","name":"Shared Favorite","owner":{"uri":"spotify:user:bob"}}]}
-            </script>
-            <a href="https://open.spotify.com/intl-de/playlist/local789">Visible public playlist</a>
-        """.trimIndent()
-
-        val playlists = importer.parseAccountPage(html, "alice")
-
-        assertEquals(setOf("first123", "other456", "local789"), playlists.map { it.id }.toSet())
-        assertEquals(SpotifyPlaylistKind.CREATED, playlists.single { it.id == "first123" }.kind)
-        assertEquals(SpotifyPlaylistKind.OTHER_OWNER, playlists.single { it.id == "other456" }.kind)
-        assertEquals(SpotifyPlaylistKind.PUBLIC, playlists.single { it.id == "local789" }.kind)
     }
 
     @Test

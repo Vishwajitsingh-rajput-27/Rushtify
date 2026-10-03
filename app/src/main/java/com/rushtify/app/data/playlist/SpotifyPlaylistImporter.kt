@@ -149,9 +149,8 @@ class SpotifyPlaylistImporter @Inject constructor(
     /** Pure parser kept internal so Spotify profile-page changes can be tested. */
     internal fun parseAccountPage(html: String, username: String? = null): List<SpotifyAccountPlaylist> {
         val found = linkedMapOf<String, SpotifyAccountPlaylist>()
-        PROFILE_JSON.findAll(html).forEach { script ->
-            val payload = script.groupValues.getOrNull(1)?.let(::unescapeHtml)
-            if (payload.isNullOrBlank()) return@forEach
+        val payload = PROFILE_JSON.find(html)?.groupValues?.getOrNull(1)?.let(::unescapeHtml)
+        if (!payload.isNullOrBlank()) {
             runCatching { json.parseToJsonElement(payload) }.getOrNull()?.let { root ->
                 walk(root) { element ->
                     val uri = element.text("uri") ?: return@walk
@@ -160,17 +159,14 @@ class SpotifyPlaylistImporter @Inject constructor(
                         .orEmpty().ifBlank { "Spotify playlist" }
                     val owner = (element["owner"] as? JsonObject)?.text("uri")
                         ?: (element["owner"] as? JsonObject)?.text("id")
-                    val ownerName = (element["owner"] as? JsonObject)?.text("display_name")
-                    val ownerId = owner?.substringAfterLast(':')?.substringAfterLast('/')
-                    val kind = when {
-                        !username.isNullOrBlank() && ownerId.equals(username, ignoreCase = true) ->
-                            SpotifyPlaylistKind.CREATED
-                        owner != null -> SpotifyPlaylistKind.OTHER_OWNER
-                        else -> SpotifyPlaylistKind.PUBLIC
+                    val kind = if (!username.isNullOrBlank() && owner?.contains(username, ignoreCase = true) == true) {
+                        SpotifyPlaylistKind.CREATED
+                    } else {
+                        SpotifyPlaylistKind.SAVED
                     }
                     val existing = found[id]
                     found[id] = existing?.copy(kind = if (existing.kind == SpotifyPlaylistKind.CREATED) existing.kind else kind)
-                        ?: SpotifyAccountPlaylist(id, title, author = ownerName ?: ownerId, kind = kind)
+                        ?: SpotifyAccountPlaylist(id, title, kind = kind)
                 }
             }
         }
@@ -190,11 +186,6 @@ class SpotifyPlaylistImporter @Inject constructor(
      */
     suspend fun fetchAndMatch(urlOrId: String): ExternalImportResult = withContext(Dispatchers.IO) {
         val playlist = fetchPlaylist(urlOrId)
-        matchPlaylist(playlist)
-    }
-
-    /** Matches rows from either the public embed scraper or authenticated Spotify Web API. */
-    suspend fun matchPlaylist(playlist: ExternalPlaylistResult): ExternalImportResult = withContext(Dispatchers.IO) {
         val rows = playlist.rows
         val limiter = Semaphore(4)
         val tracks = coroutineScope {
@@ -319,7 +310,7 @@ class SpotifyPlaylistImporter @Inject constructor(
             """https?://open\.spotify\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?playlist/[A-Za-z0-9]+""",
         )
         val PROFILE_PLAYLIST_LINK = Regex(
-            """(?:https?://)?(?:www\.)?open\.spotify\.com/(?:intl-[a-z]{2}(?:-[a-z]{2})?/|[a-z]{2}(?:-[a-z]{2})?/)?playlist/([A-Za-z0-9]+)""",
+            """open\.spotify\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?playlist/([A-Za-z0-9]+)""",
         )
         val PROFILE_JSON = Regex(
             "<script[^>]+type=[\\\"']application/json[\\\"'][^>]*>(.*?)</script>",

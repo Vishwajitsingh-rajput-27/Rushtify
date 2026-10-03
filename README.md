@@ -87,16 +87,6 @@ The **Downloads** playlist is maintained by the application rather than by manua
 
 Paste a public Spotify or Apple Music playlist link into **Playlists → Import**. Rushtify resolves the playlist metadata and matches its tracks to playable YouTube Music results. Short Spotify links are supported when the source service exposes enough public information for matching.
 
-To import playlists from a Spotify account's library, use **Connect Spotify & load library** on the same screen. Sign-in uses Spotify's Authorization Code + PKCE flow and requests read-only access to private and collaborative playlists. Playlist names and track metadata are used to match playable YouTube Music tracks; audio is not downloaded from Spotify. Followed public playlists owned by other people are included; Spotify restricts reading items for private playlists owned by someone else unless the signed-in user is a collaborator, so those may be skipped.
-
-This feature requires a Spotify Developer app. Set its **Client ID** as `SPOTIFY_CLIENT_ID` in the local `.env`/`local.properties` or Gradle environment, and register this exact redirect URI in the Spotify Developer Dashboard:
-
-```text
-rushtify://auth-callback/spotify
-```
-
-For GitHub Actions builds, add `SPOTIFY_CLIENT_ID` as a repository **Actions variable** (Settings → Secrets and variables → Actions → Variables). The Client ID is public for PKCE; do not add a Spotify client secret to the Android app. Without this configuration, username-based public-profile import continues to work, but Spotify sign-in is unavailable.
-
 ### Lyrics
 
 Rushtify retrieves lyrics through [LRCLIB](https://lrclib.net), supports synchronized and plain lyrics, and presents them in an animated player view. Downloaded tracks can retain their lyric metadata and sidecar `.lrc` files when available.

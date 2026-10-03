@@ -10,15 +10,12 @@ import com.rushtify.app.data.playlist.ExternalPlaylistSource
 import com.rushtify.app.data.playlist.PlaylistImportManager
 import com.rushtify.app.data.playlist.SavedPlaylist
 import com.rushtify.app.data.playlist.SpotifyAccountPlaylist
-import com.rushtify.app.data.playlist.SpotifyLibraryApi
-import com.rushtify.app.data.playlist.SpotifyLoginEvent
 import com.rushtify.app.data.playlist.SpotifyPlaylistImporter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -42,8 +39,6 @@ data class ExternalImportUiState(
     val spotifyPlaylists: List<SpotifyAccountPlaylist> = emptyList(),
     val selectedSpotifyPlaylistIds: Set<String> = emptySet(),
     val isLoadingSpotifyAccount: Boolean = false,
-    val spotifyAuthorizationUrl: String? = null,
-    val spotifyLibraryConnected: Boolean = false,
 )
 
 /**
@@ -55,38 +50,11 @@ data class ExternalImportUiState(
 class ExternalPlaylistImportViewModel @Inject constructor(
     private val importManager: PlaylistImportManager,
     private val spotifyPlaylistImporter: SpotifyPlaylistImporter,
-    private val spotifyLibraryApi: SpotifyLibraryApi,
     private val appleMusicPlaylistImporter: AppleMusicPlaylistImporter,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ExternalImportUiState())
     val uiState: StateFlow<ExternalImportUiState> = _uiState.asStateFlow()
-
-    init {
-        viewModelScope.launch {
-            spotifyLibraryApi.loginEvent.collect { event ->
-                when (event) {
-                    is SpotifyLoginEvent.Success -> {
-                        _uiState.update {
-                            it.copy(
-                                spotifyPlaylists = event.playlists,
-                                selectedSpotifyPlaylistIds = event.playlists.mapTo(mutableSetOf()) { playlist -> playlist.id },
-                                isLoadingSpotifyAccount = false,
-                                spotifyLibraryConnected = true,
-                                errorMessage = if (event.playlists.isEmpty()) "No playlists were returned for this Spotify account." else null,
-                            )
-                        }
-                        spotifyLibraryApi.consumeLoginEvent()
-                    }
-                    is SpotifyLoginEvent.Failure -> {
-                        _uiState.update { it.copy(isLoadingSpotifyAccount = false, errorMessage = event.message) }
-                        spotifyLibraryApi.consumeLoginEvent()
-                    }
-                    null -> Unit
-                }
-            }
-        }
-    }
 
     fun onLinkChange(value: String) {
         _uiState.update {
@@ -106,25 +74,7 @@ class ExternalPlaylistImportViewModel @Inject constructor(
     }
 
     fun onSpotifyUsernameChange(value: String) {
-        _uiState.update { it.copy(spotifyUsername = value, errorMessage = null, spotifyLibraryConnected = false) }
-    }
-
-    fun connectSpotifyLibrary() {
-        runCatching { spotifyLibraryApi.createAuthorizationUrl() }
-            .onSuccess { url ->
-                _uiState.update { it.copy(spotifyAuthorizationUrl = url, isLoadingSpotifyAccount = true, errorMessage = null) }
-            }
-            .onFailure { error ->
-                _uiState.update { it.copy(errorMessage = error.localizedMessage ?: "Couldn't start Spotify sign-in.") }
-            }
-    }
-
-    fun clearSpotifyAuthorizationUrl() {
-        _uiState.update { it.copy(spotifyAuthorizationUrl = null, isLoadingSpotifyAccount = false) }
-    }
-
-    fun handleSpotifyRedirect(uri: android.net.Uri?) {
-        viewModelScope.launch { spotifyLibraryApi.handleRedirect(uri) }
+        _uiState.update { it.copy(spotifyUsername = value, errorMessage = null) }
     }
 
     fun loadSpotifyAccountPlaylists() {
@@ -142,8 +92,7 @@ class ExternalPlaylistImportViewModel @Inject constructor(
                         isLoadingSpotifyAccount = false,
                         spotifyPlaylists = playlists,
                         selectedSpotifyPlaylistIds = playlists.mapTo(mutableSetOf()) { playlist -> playlist.id },
-                        spotifyLibraryConnected = false,
-                        errorMessage = if (playlists.isEmpty()) "No public playlists are visible on this Spotify profile." else null,
+                        errorMessage = if (playlists.isEmpty()) "No public playlists were found for this account." else null,
                     )
                 }
             } catch (e: CancellationException) {
@@ -167,17 +116,11 @@ class ExternalPlaylistImportViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isImporting = true, progress = "Preparing Spotify playlists...", errorMessage = null) }
             try {
-                val import = if (_uiState.value.spotifyLibraryConnected) {
-                    importManager.importSpotifyLibraryPlaylists(selected) { done, total ->
-                        _uiState.update { it.copy(progress = "Importing playlist $done of $total...") }
-                    }
-                } else {
-                    importManager.importSpotifyAccountPlaylists(selected) { done, total ->
-                        _uiState.update { it.copy(progress = "Importing playlist $done of $total...") }
-                    }
+                val result = importManager.importSpotifyAccountPlaylists(selected) { done, total ->
+                    _uiState.update { it.copy(progress = "Importing playlist $done of $total...") }
                 }
-                _uiState.update { it.copy(isImporting = false, progress = "${import.imported.size} imported, ${import.skipped} skipped") }
-                onSuccess(import.imported)
+                _uiState.update { it.copy(isImporting = false, progress = "${result.imported.size} imported, ${result.skipped} skipped") }
+                onSuccess(result.imported)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
