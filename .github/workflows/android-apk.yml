@@ -1,0 +1,135 @@
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and verify APKs
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+    env:
+      # These values are consumed by tools/generate_native_secrets.py and are
+      # never written to the repository or printed in logs.
+      PROVIDER_MODULE_KEY: ${{ secrets.PROVIDER_MODULE_KEY }}
+      URL: ${{ secrets.URL }}
+      KEY: ${{ secrets.KEY }}
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      RELEASE_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD || secrets.RELEASE_STORE_PASSWORD }}
+      RELEASE_KEY_ALIAS: ${{ secrets.ALIAS || secrets.RELEASE_KEY_ALIAS || 'release_key' }}
+      RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD || secrets.RELEASE_KEY_PASSWORD }}
+      RELEASE_BUILD: ${{ github.ref_type == 'tag' }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Validate release signing configuration
+        if: env.RELEASE_BUILD == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${SIGNING_KEY:-}" ]]; then
+            echo "::error::Tagged releases require the SIGNING_KEY GitHub secret."
+            exit 1
+          fi
+          if [[ -z "${RELEASE_STORE_PASSWORD:-}" || -z "${RELEASE_KEY_PASSWORD:-}" ]]; then
+            echo "::error::Tagged releases require keystore and key passwords."
+            exit 1
+          fi
+
+      - name: Run unit tests and build debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace
+
+      - name: Build signed release APKs
+        if: env.RELEASE_BUILD == 'true'
+        run: ./gradlew :app:assembleRelease :app:assembleRawRelease --stacktrace
+
+      - name: Stage APKs and generate checksums
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)"/\1/p' app/build.gradle.kts | head -n1)"
+          [[ -n "$VERSION" ]] || { echo "::error::Could not determine versionName"; exit 1; }
+
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/Rushtify-v${VERSION}-debug.apk"
+
+          if [[ "$RELEASE_BUILD" == "true" ]]; then
+            cp app/build/outputs/apk/release/app-release.apk "dist/Rushtify-v${VERSION}-release.apk"
+            cp app/build/outputs/apk/rawRelease/app-rawRelease.apk "dist/Rushtify-v${VERSION}-raw.apk"
+          fi
+
+          SDKROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          APKSIGNER="$(find "$SDKROOT/build-tools" -maxdepth 2 -type f -name apksigner 2>/dev/null | sort -V | tail -n1 || true)"
+          if [[ -z "$APKSIGNER" ]]; then
+            echo "::error::Android apksigner was not found."
+            exit 1
+          fi
+
+          for apk in dist/*.apk; do
+            echo "Verifying $apk"
+            "$APKSIGNER" verify --verbose "$apk"
+          done
+
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ls -lh dist
+          cat dist/SHA256SUMS.txt
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rushtify-v${{ steps.package.outputs.version }}-apk
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish tagged release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: Rushtify-v${{ needs.build.outputs.version }}-apk
+          path: dist
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Rushtify ${{ github.ref_name }}
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true
