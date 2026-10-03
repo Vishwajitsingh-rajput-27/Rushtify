@@ -33,6 +33,27 @@ data class ExternalPlaylistResult(
     val rows: List<ExternalTrackRow>,
 )
 
+/** A public playlist discovered on a Spotify profile page. */
+enum class SpotifyPlaylistKind(val label: String) {
+    CREATED("Created by you"),
+    SAVED("Saved by you"),
+    PUBLIC("Public playlist"),
+}
+
+data class SpotifyAccountPlaylist(
+    val id: String,
+    val title: String,
+    val author: String? = null,
+    val artworkUrl: String? = null,
+    val kind: SpotifyPlaylistKind = SpotifyPlaylistKind.PUBLIC,
+)
+
+/** Per-playlist outcome of a Spotify account import. */
+data class SpotifyAccountImportResult(
+    val imported: List<SavedPlaylist>,
+    val skipped: Int,
+)
+
 /** Outcome of a match pass: mirrors [CsvImportResult] so the UI reports identically. */
 data class ExternalImportResult(
     val source: ExternalPlaylistSource,

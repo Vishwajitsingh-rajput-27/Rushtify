@@ -107,6 +107,7 @@ class SpotifyPlaylistImporter @Inject constructor(
      */
     suspend fun fetchPlaylist(urlOrId: String): ExternalPlaylistResult = withContext(Dispatchers.IO) {
         val id = ExternalPlaylistLink.extractId(urlOrId, ExternalPlaylistSource.SPOTIFY)
+            ?: urlOrId.trim().takeIf { it.matches(PLAYLIST_ID) }
             ?: resolveShortLink(urlOrId)?.let { resolved ->
                 ExternalPlaylistLink.extractId(resolved, ExternalPlaylistSource.SPOTIFY)
             }
@@ -124,6 +125,56 @@ class SpotifyPlaylistImporter @Inject constructor(
             response.body?.string().orEmpty()
         }
         parseEmbedPage(html)
+    }
+
+    /** Discovers public playlists exposed by a Spotify profile page. */
+    suspend fun fetchAccountPlaylists(username: String): List<SpotifyAccountPlaylist> =
+        withContext(Dispatchers.IO) {
+            val clean = username.trim().removePrefix("@").substringBefore('/').trim()
+            require(clean.matches(USERNAME)) { "Enter a valid Spotify username." }
+            val request = Request.Builder()
+                .url("https://open.spotify.com/user/$clean/playlists")
+                .header("User-Agent", DESKTOP_USER_AGENT)
+                .header("Accept", "text/html")
+                .get()
+                .build()
+            val html = client.newCall(request).execute().use { response ->
+                if (response.code == 404) throw IOException("Spotify user \"$clean\" was not found.")
+                if (!response.isSuccessful) throw IOException("Spotify profile returned HTTP ${response.code}")
+                response.body?.string().orEmpty()
+            }
+            parseAccountPage(html, clean)
+        }
+
+    /** Pure parser kept internal so Spotify profile-page changes can be tested. */
+    internal fun parseAccountPage(html: String, username: String? = null): List<SpotifyAccountPlaylist> {
+        val found = linkedMapOf<String, SpotifyAccountPlaylist>()
+        val payload = PROFILE_JSON.find(html)?.groupValues?.getOrNull(1)?.let(::unescapeHtml)
+        if (!payload.isNullOrBlank()) {
+            runCatching { json.parseToJsonElement(payload) }.getOrNull()?.let { root ->
+                walk(root) { element ->
+                    val uri = element.text("uri") ?: return@walk
+                    val id = PLAYLIST_URI.find(uri)?.groupValues?.getOrNull(1) ?: return@walk
+                    val title = (element.text("name") ?: element.text("title"))?.clean()
+                        .orEmpty().ifBlank { "Spotify playlist" }
+                    val owner = (element["owner"] as? JsonObject)?.text("uri")
+                        ?: (element["owner"] as? JsonObject)?.text("id")
+                    val kind = if (!username.isNullOrBlank() && owner?.contains(username, ignoreCase = true) == true) {
+                        SpotifyPlaylistKind.CREATED
+                    } else {
+                        SpotifyPlaylistKind.SAVED
+                    }
+                    val existing = found[id]
+                    found[id] = existing?.copy(kind = if (existing.kind == SpotifyPlaylistKind.CREATED) existing.kind else kind)
+                        ?: SpotifyAccountPlaylist(id, title, kind = kind)
+                }
+            }
+        }
+        PROFILE_PLAYLIST_LINK.findAll(html).forEach { match ->
+            val id = match.groupValues[1]
+            found.putIfAbsent(id, SpotifyAccountPlaylist(id, "Spotify playlist", kind = SpotifyPlaylistKind.PUBLIC))
+        }
+        return found.values.toList()
     }
 
     /**
@@ -246,6 +297,9 @@ class SpotifyPlaylistImporter @Inject constructor(
         const val EMBED_BASE = "https://open.spotify.com/embed/playlist/"
         const val SPOTIFY_TRACK_URI = "spotify:track:"
         const val SPOTIFY_PLAYLIST_URI = "spotify:playlist:"
+        val USERNAME = Regex("[A-Za-z0-9._-]{1,100}")
+        val PLAYLIST_URI = Regex("spotify:playlist:([A-Za-z0-9]+)")
+        val PLAYLIST_ID = Regex("[A-Za-z0-9]{10,}")
         const val DESKTOP_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         val NEXT_DATA = Regex(
@@ -254,6 +308,13 @@ class SpotifyPlaylistImporter @Inject constructor(
         )
         val SPOTIFY_LINK_IN_HTML = Regex(
             """https?://open\.spotify\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?playlist/[A-Za-z0-9]+""",
+        )
+        val PROFILE_PLAYLIST_LINK = Regex(
+            """open\.spotify\.com/(?:[a-z]{2}(?:-[a-z]{2})?/)?playlist/([A-Za-z0-9]+)""",
+        )
+        val PROFILE_JSON = Regex(
+            "<script[^>]+type=[\\\"']application/json[\\\"'][^>]*>(.*?)</script>",
+            RegexOption.DOT_MATCHES_ALL,
         )
     }
 }

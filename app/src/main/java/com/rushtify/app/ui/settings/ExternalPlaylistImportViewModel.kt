@@ -9,6 +9,7 @@ import com.rushtify.app.data.playlist.ExternalPlaylistResult
 import com.rushtify.app.data.playlist.ExternalPlaylistSource
 import com.rushtify.app.data.playlist.PlaylistImportManager
 import com.rushtify.app.data.playlist.SavedPlaylist
+import com.rushtify.app.data.playlist.SpotifyAccountPlaylist
 import com.rushtify.app.data.playlist.SpotifyPlaylistImporter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -34,6 +35,10 @@ data class ExternalImportUiState(
     val errorMessage: String? = null,
     val importedCount: Int = 0,
     val lastResult: ExternalImportResult? = null,
+    val spotifyUsername: String = "",
+    val spotifyPlaylists: List<SpotifyAccountPlaylist> = emptyList(),
+    val selectedSpotifyPlaylistIds: Set<String> = emptySet(),
+    val isLoadingSpotifyAccount: Boolean = false,
 )
 
 /**
@@ -66,6 +71,62 @@ class ExternalPlaylistImportViewModel @Inject constructor(
 
     fun showError(message: String) {
         _uiState.update { it.copy(errorMessage = message) }
+    }
+
+    fun onSpotifyUsernameChange(value: String) {
+        _uiState.update { it.copy(spotifyUsername = value, errorMessage = null) }
+    }
+
+    fun loadSpotifyAccountPlaylists() {
+        val username = _uiState.value.spotifyUsername.trim()
+        if (username.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Enter a Spotify username first.") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingSpotifyAccount = true, errorMessage = null) }
+            try {
+                val playlists = spotifyPlaylistImporter.fetchAccountPlaylists(username)
+                _uiState.update {
+                    it.copy(
+                        isLoadingSpotifyAccount = false,
+                        spotifyPlaylists = playlists,
+                        selectedSpotifyPlaylistIds = playlists.mapTo(mutableSetOf()) { playlist -> playlist.id },
+                        errorMessage = if (playlists.isEmpty()) "No public playlists were found for this account." else null,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoadingSpotifyAccount = false, errorMessage = e.localizedMessage ?: "Couldn't read that Spotify account.") }
+            }
+        }
+    }
+
+    fun toggleSpotifyPlaylist(id: String) {
+        _uiState.update { state ->
+            val updated = if (id in state.selectedSpotifyPlaylistIds) state.selectedSpotifyPlaylistIds - id else state.selectedSpotifyPlaylistIds + id
+            state.copy(selectedSpotifyPlaylistIds = updated)
+        }
+    }
+
+    fun importSelectedSpotifyAccount(onSuccess: (List<SavedPlaylist>) -> Unit) {
+        val selected = _uiState.value.spotifyPlaylists.filter { it.id in _uiState.value.selectedSpotifyPlaylistIds }
+        if (selected.isEmpty() || _uiState.value.isImporting) return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isImporting = true, progress = "Preparing Spotify playlists...", errorMessage = null) }
+            try {
+                val result = importManager.importSpotifyAccountPlaylists(selected) { done, total ->
+                    _uiState.update { it.copy(progress = "Importing playlist $done of $total...") }
+                }
+                _uiState.update { it.copy(isImporting = false, progress = "${result.imported.size} imported, ${result.skipped} skipped") }
+                onSuccess(result.imported)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isImporting = false, progress = null, errorMessage = e.localizedMessage ?: "Spotify import failed.") }
+            }
+        }
     }
 
     /** Clears a loaded preview so the user can paste a different link. */
