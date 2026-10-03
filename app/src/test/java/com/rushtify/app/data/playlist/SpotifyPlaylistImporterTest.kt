@@ -25,12 +25,12 @@ class SpotifyPlaylistImporterTest {
 
         val playlists = importer.parseAccountPage(html, "alice")
 
-        assertEquals(setOf("abc123", "def456", "ghi789"), playlists.map { it.id }.toSet())
-        assertEquals("Morning Mix", playlists.single { it.id == "abc123" }.title)
-        assertEquals("Road Trip", playlists.single { it.id == "def456" }.title)
-        assertEquals(SpotifyPlaylistKind.CREATED, playlists.single { it.id == "abc123" }.kind)
-        assertEquals(SpotifyPlaylistKind.SAVED, playlists.single { it.id == "def456" }.kind)
-        assertTrue(playlists.single { it.id == "ghi789" }.title.isNotBlank())
+        assertEquals(listOf("abc123", "def456", "ghi789"), playlists.map { it.id })
+        assertEquals("Morning Mix", playlists.first().title)
+        assertEquals("Road Trip", playlists[1].title)
+        assertEquals(SpotifyPlaylistKind.CREATED, playlists.first().kind)
+        assertEquals(SpotifyPlaylistKind.SAVED, playlists[1].kind)
+        assertTrue(playlists[2].title.isNotBlank())
     }
 
     @Test
