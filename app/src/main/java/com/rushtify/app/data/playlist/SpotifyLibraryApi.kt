@@ -61,9 +61,9 @@ class SpotifyLibraryApi @Inject constructor(
 
     /** Starts a browser-based Spotify login using only playlist-read permissions. */
     fun createAuthorizationUrl(): String {
-        val clientId = configuredClientId()
+        val clientId = BuildConfig.SPOTIFY_CLIENT_ID
         check(clientId.isNotBlank()) {
-            "Enter your Spotify Developer app Client ID to enable Spotify sign-in."
+            "Spotify sign-in is not configured. Set the SPOTIFY_CLIENT_ID Gradle property or environment variable."
         }
         val verifier = randomUrlSafeString(64)
         val state = randomUrlSafeString(32)
@@ -107,26 +107,11 @@ class SpotifyLibraryApi @Inject constructor(
         _loginEvent.value = null
     }
 
-    fun configuredClientId(): String = BuildConfig.SPOTIFY_CLIENT_ID.takeIf(String::isNotBlank)
-        ?: tokenPreferences.getString(KEY_CLIENT_ID, "").orEmpty()
-
-    fun hasClientId(): Boolean = configuredClientId().isNotBlank()
-
-    fun requiresClientIdInput(): Boolean = BuildConfig.SPOTIFY_CLIENT_ID.isBlank()
-
-    fun saveClientId(clientId: String) {
-        val clean = clientId.trim()
-        require(clean.isNotBlank()) { "Enter your Spotify Developer app Client ID." }
-        check(tokenPreferences.edit().putString(KEY_CLIENT_ID, clean).commit()) {
-            "Could not save the Spotify Client ID. Please try again."
-        }
-    }
-
     fun disconnect() {
         activeToken = null
         _loginEvent.value = null
         preferences.edit().clear().apply()
-        tokenPreferences.edit().remove(KEY_ENCRYPTED_TOKEN).apply()
+        tokenPreferences.edit().clear().apply()
     }
 
     /** Read a playlist's full track list with the account's token, including private/collaborative playlists. */
@@ -188,7 +173,7 @@ class SpotifyLibraryApi @Inject constructor(
         preferences.edit().clear().apply()
         activeToken = requestToken(
             FormBody.Builder()
-                .add("client_id", configuredClientId())
+                .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
                 .add("grant_type", "authorization_code")
                 .add("code", code)
                 .add("redirect_uri", REDIRECT_URI)
@@ -265,7 +250,7 @@ class SpotifyLibraryApi @Inject constructor(
             ?: throw IOException("Spotify sign-in expired. Please connect again.")
         val refreshed = requestToken(
             FormBody.Builder()
-                .add("client_id", configuredClientId())
+                .add("client_id", BuildConfig.SPOTIFY_CLIENT_ID)
                 .add("grant_type", "refresh_token")
                 .add("refresh_token", refreshToken)
                 .build(),
@@ -391,7 +376,6 @@ class SpotifyLibraryApi @Inject constructor(
         const val KEY_CODE_VERIFIER = "code_verifier"
         const val KEY_STATE = "state"
         const val KEY_ENCRYPTED_TOKEN = "encrypted_token"
-        const val KEY_CLIENT_ID = "client_id"
         const val KEY_ALIAS = "rushtify_spotify_oauth"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

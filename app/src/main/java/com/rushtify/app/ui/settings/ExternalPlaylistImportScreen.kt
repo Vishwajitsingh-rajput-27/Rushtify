@@ -149,19 +149,6 @@ fun ExternalPlaylistImportScreen(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
-                            if (state.requiresSpotifyClientId) {
-                                OutlinedTextField(
-                                    value = state.spotifyClientId,
-                                    onValueChange = viewModel::onSpotifyClientIdChange,
-                                    label = { Text("Spotify app Client ID") },
-                                    supportingText = {
-                                        Text("From developer.spotify.com. Register rushtify://auth-callback/spotify as the app redirect URI.")
-                                    },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.fillMaxWidth(),
-                                )
-                            }
                             Button(
                                 onClick = viewModel::connectSpotifyLibrary,
                                 enabled = !state.isLoadingSpotifyAccount && !state.isImporting,
@@ -169,13 +156,7 @@ fun ExternalPlaylistImportScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.isLoadingSpotifyAccount) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                else Text(
-                                    when {
-                                        state.requiresSpotifyClientId -> "Save Client ID & connect"
-                                        state.spotifyLibraryConnected -> "Reconnect Spotify and refresh library"
-                                        else -> "Connect Spotify & load library"
-                                    },
-                                )
+                                else Text(if (state.spotifyLibraryConnected) "Reconnect Spotify and refresh library" else "Connect Spotify & load library")
                             }
                             Text("Or find only public playlists visible on a profile by username:", style = MaterialTheme.typography.bodySmall)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

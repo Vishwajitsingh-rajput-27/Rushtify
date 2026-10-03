@@ -44,8 +44,6 @@ data class ExternalImportUiState(
     val isLoadingSpotifyAccount: Boolean = false,
     val spotifyAuthorizationUrl: String? = null,
     val spotifyLibraryConnected: Boolean = false,
-    val spotifyClientId: String = "",
-    val requiresSpotifyClientId: Boolean = false,
 )
 
 /**
@@ -61,12 +59,7 @@ class ExternalPlaylistImportViewModel @Inject constructor(
     private val appleMusicPlaylistImporter: AppleMusicPlaylistImporter,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(
-        ExternalImportUiState(
-            spotifyClientId = spotifyLibraryApi.configuredClientId(),
-            requiresSpotifyClientId = spotifyLibraryApi.requiresClientIdInput(),
-        ),
-    )
+    private val _uiState = MutableStateFlow(ExternalImportUiState())
     val uiState: StateFlow<ExternalImportUiState> = _uiState.asStateFlow()
 
     init {
@@ -116,18 +109,7 @@ class ExternalPlaylistImportViewModel @Inject constructor(
         _uiState.update { it.copy(spotifyUsername = value, errorMessage = null, spotifyLibraryConnected = false) }
     }
 
-    fun onSpotifyClientIdChange(value: String) {
-        _uiState.update { it.copy(spotifyClientId = value, errorMessage = null) }
-    }
-
     fun connectSpotifyLibrary() {
-        if (_uiState.value.requiresSpotifyClientId) {
-            runCatching { spotifyLibraryApi.saveClientId(_uiState.value.spotifyClientId) }
-                .onFailure { error ->
-                    _uiState.update { it.copy(errorMessage = error.localizedMessage ?: "Enter a Spotify Client ID.") }
-                    return
-                }
-        }
         runCatching { spotifyLibraryApi.createAuthorizationUrl() }
             .onSuccess { url ->
                 _uiState.update { it.copy(spotifyAuthorizationUrl = url, isLoadingSpotifyAccount = true, errorMessage = null) }
