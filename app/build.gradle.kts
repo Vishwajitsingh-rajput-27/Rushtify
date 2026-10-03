@@ -64,7 +64,11 @@ android {
         versionName = "1.0.0"
 
         // Spotify's mobile PKCE client ID is public by design; never add a client secret to the app.
-        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${resolveSecret("SPOTIFY_CLIENT_ID")}\"")
+        // Use a configured override when present, otherwise the app's registered public client ID.
+        val spotifyClientId = resolveSecret("SPOTIFY_CLIENT_ID")
+            .takeUnless { it.isBlank() || it == "your_spotify_app_client_id" }
+            ?: "14af756841ae4142beda15534abf10bb"
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"$spotifyClientId\"")
 
         // All backend secrets (URL, API key, module key) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).

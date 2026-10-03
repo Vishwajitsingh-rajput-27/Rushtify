@@ -215,7 +215,9 @@ class PlaylistImportManager @Inject constructor(
             }.onFailure { skipped++ }
             onProgress(index + 1, playlists.size)
         }
-        require(saved.isNotEmpty()) { "No tracks from the selected Spotify library playlists could be matched." }
+        require(saved.isNotEmpty()) {
+            "Spotify couldn't expose tracks for the selected playlists. Public playlists owned by others are tried through their public page; private playlists must be owned by you or shared with you as a collaborator."
+        }
         SpotifyAccountImportResult(saved, skipped)
     }
 }

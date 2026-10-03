@@ -83,6 +83,7 @@ class SpotifyLibraryApi @Inject constructor(
             .addQueryParameter("response_type", "code")
             .addQueryParameter("redirect_uri", REDIRECT_URI)
             .addQueryParameter("scope", SCOPES)
+            .addQueryParameter("show_dialog", "true")
             .addQueryParameter("state", state)
             .addQueryParameter("code_challenge_method", "S256")
             .addQueryParameter("code_challenge", challenge)
@@ -107,20 +108,7 @@ class SpotifyLibraryApi @Inject constructor(
         _loginEvent.value = null
     }
 
-    fun configuredClientId(): String = BuildConfig.SPOTIFY_CLIENT_ID.takeIf(String::isNotBlank)
-        ?: tokenPreferences.getString(KEY_CLIENT_ID, "").orEmpty()
-
-    fun hasClientId(): Boolean = configuredClientId().isNotBlank()
-
-    fun requiresClientIdInput(): Boolean = BuildConfig.SPOTIFY_CLIENT_ID.isBlank()
-
-    fun saveClientId(clientId: String) {
-        val clean = clientId.trim()
-        require(clean.isNotBlank()) { "Enter your Spotify Developer app Client ID." }
-        check(tokenPreferences.edit().putString(KEY_CLIENT_ID, clean).commit()) {
-            "Could not save the Spotify Client ID. Please try again."
-        }
-    }
+    fun configuredClientId(): String = BuildConfig.SPOTIFY_CLIENT_ID.trim()
 
     fun disconnect() {
         activeToken = null
@@ -245,9 +233,19 @@ class SpotifyLibraryApi @Inject constructor(
         val body = client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                val detail = runCatching { json.parseToJsonElement(responseBody).let { (it as? JsonObject)?.string("error_description") } }
-                    .getOrNull()
-                throw IOException(detail ?: "Spotify API returned HTTP ${response.code}.")
+                val payload = runCatching { json.parseToJsonElement(responseBody) as? JsonObject }.getOrNull()
+                val nestedError = payload?.get("error") as? JsonObject
+                val detail = payload?.string("error_description")
+                    ?: payload?.string("message")
+                    ?: nestedError?.string("message")
+                val message = when (response.code) {
+                    401 -> "Spotify sign-in expired. Tap Connect Spotify and approve the playlist permissions again."
+                    403 -> detail?.let { "Spotify denied access to this playlist library: $it" }
+                        ?: "Spotify denied playlist access. Reconnect and approve playlist access; if it persists, check the app's allowed users and Spotify Developer app requirements."
+                    404 -> "This Spotify playlist could not be found or is no longer accessible."
+                    else -> detail ?: "Spotify couldn't complete the playlist request. Please try again."
+                }
+                throw IOException(message)
             }
             responseBody
         }
@@ -391,7 +389,6 @@ class SpotifyLibraryApi @Inject constructor(
         const val KEY_CODE_VERIFIER = "code_verifier"
         const val KEY_STATE = "state"
         const val KEY_ENCRYPTED_TOKEN = "encrypted_token"
-        const val KEY_CLIENT_ID = "client_id"
         const val KEY_ALIAS = "rushtify_spotify_oauth"
         const val ANDROID_KEYSTORE = "AndroidKeyStore"
         const val TRANSFORMATION = "AES/GCM/NoPadding"

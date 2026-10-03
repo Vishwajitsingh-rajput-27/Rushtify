@@ -87,17 +87,15 @@ The **Downloads** playlist is maintained by the application rather than by manua
 
 Paste a public Spotify or Apple Music playlist link into **Playlists → Import**. Rushtify resolves the playlist metadata and matches its tracks to playable YouTube Music results. Short Spotify links are supported when the source service exposes enough public information for matching.
 
-To import playlists from a Spotify account's library, use **Connect Spotify & load library** on the same screen. Sign-in uses Spotify's Authorization Code + PKCE flow and requests read-only access to private and collaborative playlists. Playlist names and track metadata are used to match playable YouTube Music tracks; audio is not downloaded from Spotify. Followed public playlists owned by other people are included; Spotify restricts reading items for private playlists owned by someone else unless the signed-in user is a collaborator, so those may be skipped.
+To import playlists from a Spotify account's library, use **Connect Spotify** on the same screen. Sign-in uses Spotify's Authorization Code + PKCE flow and requests read-only access to private and collaborative playlists. Playlist names and track metadata are used to match playable YouTube Music tracks; audio is not downloaded from Spotify. Followed public playlists owned by other people are included; Spotify restricts reading items for private playlists owned by someone else unless the signed-in user is a collaborator, so those may be skipped.
 
-This feature requires a Spotify Developer app. Register this exact redirect URI in the Spotify Developer Dashboard:
+End users only need to tap **Connect Spotify** and authorize read-only access. The app uses its bundled public PKCE Client ID; it does not require users to create a Spotify Developer app or enter an ID. The Spotify Developer app associated with that Client ID must have this exact redirect URI registered:
 
 ```text
 rushtify://auth-callback/spotify
 ```
 
-For GitHub Actions builds, add `SPOTIFY_CLIENT_ID` as a repository **Actions variable** (Settings → Secrets and variables → Actions → Variables). The Client ID is public for PKCE; do not add a Spotify client secret to the Android app. If no Client ID is embedded or entered in the app, username-based public-profile import still works but Spotify sign-in is unavailable.
-
-If the APK was built without that Actions variable, the Spotify import screen asks for the public Client ID directly and saves it on the device. Developers can instead set `SPOTIFY_CLIENT_ID` in local `.env`/`local.properties` or the Gradle environment.
+The Client ID is public for PKCE; never add a Spotify client secret to the Android app. Developers can override the bundled ID by setting `SPOTIFY_CLIENT_ID` in GitHub Actions variables or the local `.env`/`local.properties` or Gradle environment. If the Spotify app is in Development Mode, Spotify requires the app owner to have Premium and each test account to be added to the app's allowed users; otherwise Spotify may refuse playlist API requests. See Spotify's [February 2026 migration guide](https://developer.spotify.com/documentation/web-api/tutorials/february-2026-migration-guide).
 
 ### Lyrics
 
