@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -142,12 +143,25 @@ fun ExternalPlaylistImportScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Import your Spotify library", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Import Spotify playlists", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text(
-                                "Sign in to load playlists in your library, including public playlists you follow. Rushtify only reads playlist details and matches tracks for import. Spotify may restrict private playlists owned by other people unless you collaborate on them.",
+                                "Connect Spotify to load playlists in your library, including public playlists created by other people and collaborative playlists. Spotify may restrict tracks from private playlists owned by others unless you collaborate on them. Access is read-only; selected playlists are imported into Rushtify.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                             )
+                            if (state.requiresSpotifyClientId) {
+                                OutlinedTextField(
+                                    value = state.spotifyClientId,
+                                    onValueChange = viewModel::onSpotifyClientIdChange,
+                                    label = { Text("Spotify app Client ID") },
+                                    supportingText = {
+                                        Text("From developer.spotify.com. Register rushtify://auth-callback/spotify as the app redirect URI.")
+                                    },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                             Button(
                                 onClick = viewModel::connectSpotifyLibrary,
                                 enabled = !state.isLoadingSpotifyAccount && !state.isImporting,
@@ -155,7 +169,34 @@ fun ExternalPlaylistImportScreen(
                                 modifier = Modifier.fillMaxWidth(),
                             ) {
                                 if (state.isLoadingSpotifyAccount) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                else Text(if (state.spotifyLibraryConnected) "Reconnect Spotify" else "Connect Spotify")
+                                else Text(
+                                    when {
+                                        state.requiresSpotifyClientId -> "Save Client ID & connect"
+                                        state.spotifyLibraryConnected -> "Reconnect Spotify and refresh library"
+                                        else -> "Connect Spotify & load library"
+                                    },
+                                )
+                            }
+                            Text("Or find only public playlists visible on a profile by username:", style = MaterialTheme.typography.bodySmall)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = state.spotifyUsername,
+                                    onValueChange = viewModel::onSpotifyUsernameChange,
+                                    placeholder = { Text("Spotify username") },
+                                    leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Button(
+                                    onClick = viewModel::loadSpotifyAccountPlaylists,
+                                    enabled = state.spotifyUsername.isNotBlank() && !state.isLoadingSpotifyAccount && !state.isImporting,
+                                    shape = CircleShape,
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                ) {
+                                    if (state.isLoadingSpotifyAccount) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                                    else Text("Find")
+                                }
                             }
                         }
                     }
@@ -165,11 +206,13 @@ fun ExternalPlaylistImportScreen(
                         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    "${state.spotifyPlaylists.size} playlists in your library",
+                                    if (state.spotifyLibraryConnected) "${state.spotifyPlaylists.size} playlists in your library"
+                                    else "${state.spotifyPlaylists.size} public playlists on profile",
                                     fontWeight = FontWeight.Bold,
                                 )
                                 Text(
-                                    "Includes public playlists you follow • all selected by default",
+                                    if (state.spotifyLibraryConnected) "Includes followed playlists owned by other people • all selected by default"
+                                    else "Profile-visible playlists only • all selected by default",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )

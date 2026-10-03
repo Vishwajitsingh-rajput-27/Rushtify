@@ -38,11 +38,14 @@ data class ExternalImportUiState(
     val errorMessage: String? = null,
     val importedCount: Int = 0,
     val lastResult: ExternalImportResult? = null,
+    val spotifyUsername: String = "",
     val spotifyPlaylists: List<SpotifyAccountPlaylist> = emptyList(),
     val selectedSpotifyPlaylistIds: Set<String> = emptySet(),
     val isLoadingSpotifyAccount: Boolean = false,
     val spotifyAuthorizationUrl: String? = null,
     val spotifyLibraryConnected: Boolean = false,
+    val spotifyClientId: String = "",
+    val requiresSpotifyClientId: Boolean = false,
 )
 
 /**
@@ -59,7 +62,10 @@ class ExternalPlaylistImportViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
-        ExternalImportUiState(),
+        ExternalImportUiState(
+            spotifyClientId = spotifyLibraryApi.configuredClientId(),
+            requiresSpotifyClientId = spotifyLibraryApi.requiresClientIdInput(),
+        ),
     )
     val uiState: StateFlow<ExternalImportUiState> = _uiState.asStateFlow()
 
@@ -106,7 +112,22 @@ class ExternalPlaylistImportViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = message) }
     }
 
+    fun onSpotifyUsernameChange(value: String) {
+        _uiState.update { it.copy(spotifyUsername = value, errorMessage = null, spotifyLibraryConnected = false) }
+    }
+
+    fun onSpotifyClientIdChange(value: String) {
+        _uiState.update { it.copy(spotifyClientId = value, errorMessage = null) }
+    }
+
     fun connectSpotifyLibrary() {
+        if (_uiState.value.requiresSpotifyClientId) {
+            runCatching { spotifyLibraryApi.saveClientId(_uiState.value.spotifyClientId) }
+                .onFailure { error ->
+                    _uiState.update { it.copy(errorMessage = error.localizedMessage ?: "Enter a Spotify Client ID.") }
+                    return
+                }
+        }
         runCatching { spotifyLibraryApi.createAuthorizationUrl() }
             .onSuccess { url ->
                 _uiState.update { it.copy(spotifyAuthorizationUrl = url, isLoadingSpotifyAccount = true, errorMessage = null) }
@@ -122,6 +143,33 @@ class ExternalPlaylistImportViewModel @Inject constructor(
 
     fun handleSpotifyRedirect(uri: android.net.Uri?) {
         viewModelScope.launch { spotifyLibraryApi.handleRedirect(uri) }
+    }
+
+    fun loadSpotifyAccountPlaylists() {
+        val username = _uiState.value.spotifyUsername.trim()
+        if (username.isBlank()) {
+            _uiState.update { it.copy(errorMessage = "Enter a Spotify username first.") }
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingSpotifyAccount = true, errorMessage = null) }
+            try {
+                val playlists = spotifyPlaylistImporter.fetchAccountPlaylists(username)
+                _uiState.update {
+                    it.copy(
+                        isLoadingSpotifyAccount = false,
+                        spotifyPlaylists = playlists,
+                        selectedSpotifyPlaylistIds = playlists.mapTo(mutableSetOf()) { playlist -> playlist.id },
+                        spotifyLibraryConnected = false,
+                        errorMessage = if (playlists.isEmpty()) "No public playlists are visible on this Spotify profile." else null,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoadingSpotifyAccount = false, errorMessage = e.localizedMessage ?: "Couldn't read that Spotify account.") }
+            }
+        }
     }
 
     fun toggleSpotifyPlaylist(id: String) {
