@@ -21,6 +21,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import com.rushtify.app.data.repository.LastFmAuthCallbackCoordinator
+import com.rushtify.app.data.playlist.SpotifyLibraryApi
 import com.rushtify.app.ui.navigation.RushtifyNavHost
 import com.rushtify.app.ui.navigation.Screen
 import com.rushtify.app.ui.player.PlayerHost
@@ -35,6 +36,9 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
 
     @Inject
     lateinit var lastFmAuthCallback: LastFmAuthCallbackCoordinator
+
+    @Inject
+    lateinit var spotifyLibraryApi: SpotifyLibraryApi
 
     @Inject
     lateinit var linkPlaybackResolver: dagger.Lazy<com.rushtify.app.playback.LinkPlaybackResolver>
@@ -80,6 +84,7 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         }
         runCatching { lastFmAuthCallback.capture(intent) }
             .onFailure { android.util.Log.e(STARTUP_TAG, "Auth callback ignored during startup", it) }
+        handleSpotifyAuthIntent(intent)
         handlePlaybackIntent(intent)
         handleNavigationIntent(intent)
         runCatching {
@@ -203,8 +208,16 @@ class MainActivity : androidx.fragment.app.FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         runCatching { lastFmAuthCallback.capture(intent) }
+        handleSpotifyAuthIntent(intent)
         handlePlaybackIntent(intent)
         handleNavigationIntent(intent)
+    }
+
+    private fun handleSpotifyAuthIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        if (uri.scheme == "rushtify" && uri.host == "auth-callback" && uri.path == "/spotify") {
+            lifecycleScope.launch { spotifyLibraryApi.handleRedirect(uri) }
+        }
     }
 
     private companion object {

@@ -35,9 +35,10 @@ data class ExternalPlaylistResult(
 
 /** A public playlist discovered on a Spotify profile page. */
 enum class SpotifyPlaylistKind(val label: String) {
-    CREATED("Created by you"),
-    SAVED("Saved by you"),
-    PUBLIC("Public playlist"),
+    CREATED("Created by this user"),
+    OTHER_OWNER("Created by another user"),
+    PUBLIC("Public playlist on profile"),
+    IN_LIBRARY("In your Spotify library"),
 }
 
 data class SpotifyAccountPlaylist(

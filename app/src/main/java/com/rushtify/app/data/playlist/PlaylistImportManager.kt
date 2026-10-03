@@ -21,6 +21,7 @@ class PlaylistImportManager @Inject constructor(
     private val csvPlaylistImporter: CsvPlaylistImporter,
     private val ytMusicPreferences: YtMusicPreferences,
     private val spotifyPlaylistImporter: SpotifyPlaylistImporter,
+    private val spotifyLibraryApi: SpotifyLibraryApi,
     private val appleMusicPlaylistImporter: AppleMusicPlaylistImporter,
 ) {
 
@@ -183,6 +184,38 @@ class PlaylistImportManager @Inject constructor(
             onProgress(index + 1, playlists.size)
         }
         require(saved.isNotEmpty()) { "No tracks from the selected Spotify playlists could be matched." }
+        SpotifyAccountImportResult(saved, skipped)
+    }
+
+    /** Imports selected playlists from the authenticated Spotify user's library. */
+    suspend fun importSpotifyLibraryPlaylists(
+        playlists: List<SpotifyAccountPlaylist>,
+        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> },
+    ): SpotifyAccountImportResult = withContext(Dispatchers.IO) {
+        val saved = mutableListOf<SavedPlaylist>()
+        var skipped = 0
+        playlists.forEachIndexed { index, playlist ->
+            runCatching {
+                // Spotify's current API only exposes full playlist items to owners/collaborators.
+                // Followed public playlists owned by someone else are still included in /me/playlists;
+                // use their public embed page as a read-only fallback.
+                val spotifyPlaylist = runCatching { spotifyLibraryApi.fetchPlaylistTracks(playlist) }
+                    .getOrElse { spotifyPlaylistImporter.fetchPlaylist(playlist.id) }
+                val result = spotifyPlaylistImporter.matchPlaylist(spotifyPlaylist)
+                if (result.tracks.isEmpty()) {
+                    skipped++
+                } else {
+                    saved += playlistRepository.save(
+                        title = result.suggestedTitle.ifBlank { playlist.title },
+                        subtitle = "Spotify Library Import • ${result.matchedCount} imported, ${result.totalRows - result.matchedCount} skipped",
+                        mode = "custom",
+                        tracks = result.tracks,
+                    )
+                }
+            }.onFailure { skipped++ }
+            onProgress(index + 1, playlists.size)
+        }
+        require(saved.isNotEmpty()) { "No tracks from the selected Spotify library playlists could be matched." }
         SpotifyAccountImportResult(saved, skipped)
     }
 }

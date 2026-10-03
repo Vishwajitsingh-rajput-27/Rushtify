@@ -63,6 +63,9 @@ android {
         versionCode = 20
         versionName = "1.0.0"
 
+        // Spotify's mobile PKCE client ID is public by design; never add a client secret to the app.
+        buildConfigField("String", "SPOTIFY_CLIENT_ID", "\"${resolveSecret("SPOTIFY_CLIENT_ID")}\"")
+
         // All backend secrets (URL, API key, module key) live strictly in native .so via
         // SecretsBridge_generated.h (tools/generate_native_secrets.py).
         // No secret fields are exposed in DEX / BuildConfig.
