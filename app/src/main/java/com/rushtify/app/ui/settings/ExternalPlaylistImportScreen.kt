@@ -32,13 +32,11 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -120,78 +118,6 @@ fun ExternalPlaylistImportScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                item {
-                    Card(
-                        shape = RoundedCornerShape(22.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Import a Spotify account", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text(
-                                "Enter a Spotify username to find playlists created by that user and public playlists saved by that user, then import all of them at once. Private playlists and Liked Songs are not visible without Spotify authorization.",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedTextField(
-                                    value = state.spotifyUsername,
-                                    onValueChange = viewModel::onSpotifyUsernameChange,
-                                    placeholder = { Text("Spotify username") },
-                                    leadingIcon = { Icon(Icons.Filled.Person, contentDescription = null) },
-                                    singleLine = true,
-                                    shape = RoundedCornerShape(16.dp),
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Button(
-                                    onClick = viewModel::loadSpotifyAccountPlaylists,
-                                    enabled = state.spotifyUsername.isNotBlank() && !state.isLoadingSpotifyAccount && !state.isImporting,
-                                    shape = CircleShape,
-                                    contentPadding = PaddingValues(horizontal = 16.dp),
-                                ) {
-                                    if (state.isLoadingSpotifyAccount) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                                    else Text("Find")
-                                }
-                            }
-                        }
-                    }
-                }
-                if (state.spotifyPlaylists.isNotEmpty()) {
-                    item {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("${state.spotifyPlaylists.size} created and saved playlists", fontWeight = FontWeight.Bold)
-                                Text("Created by you and public playlists saved by you • all selected by default", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            androidx.compose.material3.TextButton(onClick = {
-                                val allSelected = state.selectedSpotifyPlaylistIds.size == state.spotifyPlaylists.size
-                                state.spotifyPlaylists.forEach { playlist ->
-                                    if ((playlist.id in state.selectedSpotifyPlaylistIds) == allSelected) viewModel.toggleSpotifyPlaylist(playlist.id)
-                                }
-                            }) { Text(if (state.selectedSpotifyPlaylistIds.size == state.spotifyPlaylists.size) "Clear all" else "Select all") }
-                        }
-                    }
-                    itemsIndexed(state.spotifyPlaylists, key = { _, playlist -> "spotify_account_${playlist.id}" }) { _, playlist ->
-                        Card(
-                            onClick = { viewModel.toggleSpotifyPlaylist(playlist.id) },
-                            shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = playlist.id in state.selectedSpotifyPlaylistIds,
-                                    onCheckedChange = { viewModel.toggleSpotifyPlaylist(playlist.id) },
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(playlist.title, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(playlist.kind.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
-                }
                 // Link input + Preview action
                 item {
                     Card(
@@ -403,7 +329,7 @@ fun ExternalPlaylistImportScreen(
 
         // Floating bottom Import CTA
         AnimatedVisibility(
-            visible = rows.isNotEmpty() || state.selectedSpotifyPlaylistIds.isNotEmpty(),
+            visible = rows.isNotEmpty(),
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier
@@ -416,11 +342,7 @@ fun ExternalPlaylistImportScreen(
             Button(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (rows.isEmpty()) {
-                        viewModel.importSelectedSpotifyAccount { imported -> imported.firstOrNull()?.let(onImportSuccess) }
-                    } else {
-                        viewModel.import { saved -> onImportSuccess(saved) }
-                    }
+                    viewModel.import { saved -> onImportSuccess(saved) }
                 },
                 enabled = !state.isImporting,
                 shape = CircleShape,
@@ -446,8 +368,7 @@ fun ExternalPlaylistImportScreen(
                     Icon(Icons.Filled.Download, contentDescription = null, modifier = Modifier.size(20.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (rows.isEmpty()) "Import ${state.selectedSpotifyPlaylistIds.size} playlists"
-                        else if (rows.size == 1) "Import 1 track" else "Import ${rows.size} tracks",
+                        if (rows.size == 1) "Import 1 track" else "Import ${rows.size} tracks",
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                     )

@@ -59,7 +59,6 @@ import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
@@ -182,10 +181,7 @@ fun PlaylistScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         IconButton(onClick = onOpenImport, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Filled.Link, contentDescription = "Import playlist link")
-                        }
-                        IconButton(onClick = onOpenImport, modifier = Modifier.size(40.dp)) {
-                            Icon(Icons.Filled.Person, contentDescription = "Import Spotify account playlists")
+                            Icon(Icons.Filled.Link, contentDescription = "Import playlist")
                         }
                         IconButton(onClick = { showBulkImportDialog = true }, modifier = Modifier.size(40.dp)) {
                             Icon(Icons.Filled.Key, contentDescription = "Import playlist pack with code")

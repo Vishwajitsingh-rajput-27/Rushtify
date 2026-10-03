@@ -158,31 +158,4 @@ class PlaylistImportManager @Inject constructor(
         )
         Pair(saved, result)
     }
-
-    /** Imports each selected public playlist belonging to a Spotify username. */
-    suspend fun importSpotifyAccountPlaylists(
-        playlists: List<SpotifyAccountPlaylist>,
-        onProgress: (completed: Int, total: Int) -> Unit = { _, _ -> },
-    ): SpotifyAccountImportResult = withContext(Dispatchers.IO) {
-        val saved = mutableListOf<SavedPlaylist>()
-        var skipped = 0
-        playlists.forEachIndexed { index, playlist ->
-            runCatching {
-                val result = spotifyPlaylistImporter.fetchAndMatch(playlist.id)
-                if (result.tracks.isEmpty()) {
-                    skipped++
-                } else {
-                    saved += playlistRepository.save(
-                        title = result.suggestedTitle.ifBlank { playlist.title },
-                        subtitle = "Spotify Import • ${result.matchedCount} imported, ${result.totalRows - result.matchedCount} skipped",
-                        mode = "custom",
-                        tracks = result.tracks,
-                    )
-                }
-            }.onFailure { skipped++ }
-            onProgress(index + 1, playlists.size)
-        }
-        require(saved.isNotEmpty()) { "No tracks from the selected Spotify playlists could be matched." }
-        SpotifyAccountImportResult(saved, skipped)
-    }
 }
